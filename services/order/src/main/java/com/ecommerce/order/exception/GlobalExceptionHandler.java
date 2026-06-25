@@ -15,7 +15,9 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-  /** Insufficient stock carries the offending product id (contract: body field {@code product_id}). */
+  /**
+   * Insufficient stock carries the offending product id (contract: body field {@code product_id}).
+   */
   @ExceptionHandler(InsufficientStockException.class)
   public ResponseEntity<ErrorResponse> handleInsufficientStock(
       InsufficientStockException ex, HttpServletRequest request) {
@@ -73,7 +75,9 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex, HttpServletRequest request) {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-        .body(ErrorResponse.of("INTERNAL_ERROR", "An unexpected error occurred", request.getRequestURI()));
+        .body(
+            ErrorResponse.of(
+                "INTERNAL_ERROR", "An unexpected error occurred", request.getRequestURI()));
   }
 
   private static String formatFieldError(FieldError error) {

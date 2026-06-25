@@ -12,7 +12,8 @@ public record ErrorResponse(
     return new ErrorResponse(error, message, Instant.now(), path, null);
   }
 
-  public static ErrorResponse withProduct(String error, String message, String path, Long productId) {
+  public static ErrorResponse withProduct(
+      String error, String message, String path, Long productId) {
     return new ErrorResponse(error, message, Instant.now(), path, productId);
   }
 }

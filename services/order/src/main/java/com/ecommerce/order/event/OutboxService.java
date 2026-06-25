@@ -38,7 +38,8 @@ public class OutboxService {
         order.getItems().stream()
             .map(
                 (OrderItem it) ->
-                    new OrderPlacedPayload.Item(it.getProductId(), it.getQuantity(), it.getUnitPrice()))
+                    new OrderPlacedPayload.Item(
+                        it.getProductId(), it.getQuantity(), it.getUnitPrice()))
             .toList();
     OrderPlacedPayload payload =
         new OrderPlacedPayload(

@@ -79,7 +79,10 @@ public class ProductReservationClient {
     }
   }
 
-  /** Release a reservation (cancellation / placement compensation). Idempotent: a 2xx/204 means done. */
+  /**
+   * Release a reservation (cancellation / placement compensation). Idempotent: a 2xx/204 means
+   * done.
+   */
   public void release(UUID orderId) {
     try {
       restClient
@@ -101,7 +104,9 @@ public class ProductReservationClient {
     }
   }
 
-  /** A 422 from the reservation API (e.g. PRODUCT_NOT_FOUND, MIXED_CURRENCY_CART), relayed as-is. */
+  /**
+   * A 422 from the reservation API (e.g. PRODUCT_NOT_FOUND, MIXED_CURRENCY_CART), relayed as-is.
+   */
   public static class ReservationRejectedException extends ApiException {
     public ReservationRejectedException(String code, String message) {
       super(HttpStatus.UNPROCESSABLE_ENTITY, code, message);
