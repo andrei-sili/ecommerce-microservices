@@ -174,12 +174,72 @@ services:
       SPRING_DATASOURCE_USERNAME: ${PRODUCT_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      # Product fails fast at startup if this is unset; Order sends it as X-Internal-Api-Key.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       - "8082:8082"
     networks:
       - ecommerce-net
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # --- Application services (Wave 2) ---
+
+  cart-service:
+    build:
+      context: ../services/cart
+    image: ecommerce/cart-service:dev
+    container_name: ecommerce-cart-service
+    restart: unless-stopped
+    depends_on:
+      cart-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://cart-db:5432/${CART_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${CART_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${CART_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      # Override the bare-hostname default (http://product:8082) with the compose DNS name.
+      PRODUCT_SERVICE_URL: http://product-service:8082
+    ports:
+      - "8083:8083"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  order-service:
+    build:
+      context: ../services/order
+    image: ecommerce/order-service:dev
+    container_name: ecommerce-order-service
+    restart: unless-stopped
+    depends_on:
+      order-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/${ORDER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${ORDER_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # Override the bare-hostname defaults with the compose DNS names.
+      CART_SERVICE_URL: http://cart-service:8083
+      PRODUCT_SERVICE_URL: http://product-service:8082
+    ports:
+      - "8084:8084"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 10s
       timeout: 5s
       retries: 10
