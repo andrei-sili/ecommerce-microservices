@@ -2,6 +2,7 @@ package com.ecommerce.user.event;
 
 import com.ecommerce.user.model.OutboxEvent;
 import com.ecommerce.user.repository.OutboxEventRepository;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
@@ -20,7 +21,10 @@ public class OutboxService {
   // Dedicated mapper: the event contract uses camelCase field names (userId, occurredAt),
   // independent of the API's snake_case JSON convention.
   private final JsonMapper mapper =
-      JsonMapper.builder().addModule(new JavaTimeModule()).build();
+      JsonMapper.builder()
+          .addModule(new JavaTimeModule())
+          .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+          .build();
 
   public OutboxService(OutboxEventRepository repository) {
     this.repository = repository;
