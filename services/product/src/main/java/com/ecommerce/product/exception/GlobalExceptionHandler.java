@@ -14,6 +14,15 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+  @ExceptionHandler(ProductScopedException.class)
+  public ResponseEntity<ProductScopedErrorResponse> handleProductScoped(
+      ProductScopedException ex, HttpServletRequest request) {
+    return ResponseEntity.status(ex.getStatus())
+        .body(
+            ProductScopedErrorResponse.of(
+                ex.getCode(), ex.getMessage(), request.getRequestURI(), ex.getProductId()));
+  }
+
   @ExceptionHandler(ApiException.class)
   public ResponseEntity<ErrorResponse> handleApi(ApiException ex, HttpServletRequest request) {
     return ResponseEntity.status(ex.getStatus())
