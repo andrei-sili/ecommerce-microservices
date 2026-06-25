@@ -5,9 +5,9 @@ spring:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/product_db}
-    username: ${SPRING_DATASOURCE_USERNAME:product}
-    password: ${SPRING_DATASOURCE_PASSWORD:product}
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -25,7 +25,7 @@ server:
 
 security:
   jwt:
-    secret: ${JWT_SECRET:}
+    secret: ${JWT_SECRET}
 
 management:
   endpoints:
