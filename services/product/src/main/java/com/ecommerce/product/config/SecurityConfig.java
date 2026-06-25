@@ -1,9 +1,12 @@
 package com.ecommerce.product.config;
 
+import com.ecommerce.product.security.InternalApiKeyFilter;
 import com.ecommerce.product.security.JwtAuthenticationFilter;
 import com.ecommerce.product.security.JwtService;
 import com.ecommerce.product.security.RestAccessDeniedHandler;
 import com.ecommerce.product.security.RestAuthenticationEntryPoint;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,21 +15,34 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.util.StringUtils;
 
 @Configuration
 public class SecurityConfig {
 
+  /** Path prefix of the internal reservation endpoints, gated by the shared internal API key. */
+  private static final String RESERVATIONS_PATH = "/api/v1/inventory/reservations/**";
+
   private final JwtService jwtService;
   private final RestAuthenticationEntryPoint authenticationEntryPoint;
   private final RestAccessDeniedHandler accessDeniedHandler;
+  private final ObjectMapper objectMapper;
+  private final String internalApiKey;
 
   public SecurityConfig(
       JwtService jwtService,
       RestAuthenticationEntryPoint authenticationEntryPoint,
-      RestAccessDeniedHandler accessDeniedHandler) {
+      RestAccessDeniedHandler accessDeniedHandler,
+      ObjectMapper objectMapper,
+      @Value("${security.internal-api-key}") String internalApiKey) {
     this.jwtService = jwtService;
     this.authenticationEntryPoint = authenticationEntryPoint;
     this.accessDeniedHandler = accessDeniedHandler;
+    this.objectMapper = objectMapper;
+    if (!StringUtils.hasText(internalApiKey)) {
+      throw new IllegalStateException("INTERNAL_API_KEY must be configured");
+    }
+    this.internalApiKey = internalApiKey;
   }
 
   @Bean
@@ -37,6 +53,11 @@ public class SecurityConfig {
         .authorizeHttpRequests(
             auth ->
                 auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                    .permitAll()
+                    // Internal reservation endpoints are gated by the X-Internal-Api-Key filter,
+                    // not by JWT/ADMIN. Permit them here so the broad write rules below don't force
+                    // ADMIN; the InternalApiKeyFilter (added before the JWT filter) is the gate.
+                    .requestMatchers(RESERVATIONS_PATH)
                     .permitAll()
                     // Reads are public.
                     .requestMatchers(HttpMethod.GET, "/api/v1/**")
@@ -57,7 +78,11 @@ public class SecurityConfig {
                 ex.authenticationEntryPoint(authenticationEntryPoint)
                     .accessDeniedHandler(accessDeniedHandler))
         .addFilterBefore(
-            new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class);
+            new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
+        // Runs before the JWT filter; only acts on the reservation paths (see shouldNotFilter).
+        .addFilterBefore(
+            new InternalApiKeyFilter(internalApiKey, objectMapper),
+            JwtAuthenticationFilter.class);
 
     return http.build();
   }

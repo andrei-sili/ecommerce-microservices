@@ -26,6 +26,8 @@ server:
 security:
   jwt:
     secret: ${JWT_SECRET}
+  # Shared key for system-to-system calls to the internal reservation endpoints (Order -> Product).
+  internal-api-key: ${INTERNAL_API_KEY}
 
 management:
   endpoints:
