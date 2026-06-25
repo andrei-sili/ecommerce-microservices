@@ -18,13 +18,21 @@ import org.springframework.util.StringUtils;
 @Component
 public class JwtService {
 
+  /** HS256 requires a key of at least 256 bits; mirrors the User Service issuer guard. */
+  private static final int MIN_SECRET_BYTES = 32;
+
   private final SecretKey key;
 
   public JwtService(@Value("${security.jwt.secret}") String secret) {
     if (!StringUtils.hasText(secret)) {
       throw new IllegalStateException("JWT_SECRET must be configured");
     }
-    this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+    byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+    if (secretBytes.length < MIN_SECRET_BYTES) {
+      throw new IllegalStateException(
+          "JWT_SECRET must be at least " + MIN_SECRET_BYTES + " bytes for HS256");
+    }
+    this.key = Keys.hmacShaKeyFor(secretBytes);
   }
 
   public AuthenticatedUser parse(String token) {
