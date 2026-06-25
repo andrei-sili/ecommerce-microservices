@@ -4,40 +4,36 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.client.ClientHttpRequestFactories;
 import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.client.ClientHttpRequestFactory;
-import org.springframework.web.client.RestClient;
+import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 
+/**
+ * Shared client infrastructure: the bounded-timeout customizer and the {@code clients.*}
+ * properties. The two REST clients live in {@link CartClientConfig} / {@link ProductClientConfig}
+ * (one bean each) so a wire test can load a single client per context.
+ */
 @Configuration
 @EnableConfigurationProperties(ClientsProperties.class)
+@Import({CartClientConfig.class, ProductClientConfig.class})
 public class ClientsConfig {
 
-  /** Shared request factory: bounded connect/read timeouts so a slow upstream cannot hang Order. */
+  /**
+   * Applies bounded connect/read timeouts via a {@link RestClientCustomizer} (not an imperative
+   * {@code .requestFactory(...)} call on a derived client) so it composes with Boot's other builder
+   * customizers instead of replacing the factory they set. Ordered first so any later customizer
+   * that swaps the request factory still wins. A slow upstream cannot hang Order.
+   */
   @Bean
-  public ClientHttpRequestFactory clientHttpRequestFactory(ClientsProperties properties) {
+  @Order(Ordered.HIGHEST_PRECEDENCE)
+  public RestClientCustomizer timeoutRestClientCustomizer(ClientsProperties properties) {
     ClientHttpRequestFactorySettings settings =
         ClientHttpRequestFactorySettings.DEFAULTS
             .withConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
-    return ClientHttpRequestFactories.get(settings);
-  }
-
-  @Bean
-  public RestClient cartRestClient(
-      ClientsProperties properties, ClientHttpRequestFactory requestFactory) {
-    return RestClient.builder()
-        .baseUrl(properties.getCart().getBaseUrl())
-        .requestFactory(requestFactory)
-        .build();
-  }
-
-  @Bean
-  public RestClient productRestClient(
-      ClientsProperties properties, ClientHttpRequestFactory requestFactory) {
-    return RestClient.builder()
-        .baseUrl(properties.getProduct().getBaseUrl())
-        .requestFactory(requestFactory)
-        .build();
+    return builder -> builder.requestFactory(ClientHttpRequestFactories.get(settings));
   }
 }
