@@ -1,0 +1,33 @@
+# Secrets & environment — NEVER commit real values (see security rules)
+.env
+*.env
+!.env.example
+
+# Java / Maven
+target/
+*.class
+*.jar
+!**/.mvn/wrapper/maven-wrapper.jar
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / editor
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & build artifacts
+*.log
+dist/
+build/
