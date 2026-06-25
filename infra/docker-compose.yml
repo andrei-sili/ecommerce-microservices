@@ -1,0 +1,145 @@
+# Wave 0 — databases only (database-per-service pattern).
+# One Postgres container per service DB on a shared Docker network.
+# Application services arrive in Wave 1+. Do NOT add Kong/Consul/RabbitMQ here.
+
+name: ecommerce
+
+services:
+  user-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-user-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${USER_DB_USER}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD}
+      POSTGRES_DB: ${USER_DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - user-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${USER_DB_USER} -d ${USER_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  product-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-product-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PRODUCT_DB_USER}
+      POSTGRES_PASSWORD: ${PRODUCT_DB_PASSWORD}
+      POSTGRES_DB: ${PRODUCT_DB_NAME}
+    ports:
+      - "5433:5432"
+    volumes:
+      - product-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PRODUCT_DB_USER} -d ${PRODUCT_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  order-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-order-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${ORDER_DB_USER}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
+      POSTGRES_DB: ${ORDER_DB_NAME}
+    ports:
+      - "5434:5432"
+    volumes:
+      - order-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ORDER_DB_USER} -d ${ORDER_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  cart-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-cart-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${CART_DB_USER}
+      POSTGRES_PASSWORD: ${CART_DB_PASSWORD}
+      POSTGRES_DB: ${CART_DB_NAME}
+    ports:
+      - "5435:5432"
+    volumes:
+      - cart-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CART_DB_USER} -d ${CART_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  payment-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-payment-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PAYMENT_DB_USER}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD}
+      POSTGRES_DB: ${PAYMENT_DB_NAME}
+    ports:
+      - "5436:5432"
+    volumes:
+      - payment-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PAYMENT_DB_USER} -d ${PAYMENT_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  notification-db:
+    image: postgres:16-alpine
+    container_name: ecommerce-notification-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${NOTIFICATION_DB_USER}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME}
+    ports:
+      - "5437:5432"
+    volumes:
+      - notification-db-data:/var/lib/postgresql/data
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER} -d ${NOTIFICATION_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  ecommerce-net:
+    name: ecommerce-net
+    driver: bridge
+
+volumes:
+  user-db-data:
+  product-db-data:
+  order-db-data:
+  cart-db-data:
+  payment-db-data:
+  notification-db-data:
