@@ -1,6 +1,9 @@
 spring:
   application:
     name: product-service
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/product_db}
     username: ${SPRING_DATASOURCE_USERNAME:product}
