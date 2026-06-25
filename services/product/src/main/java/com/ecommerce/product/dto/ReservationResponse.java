@@ -10,11 +10,7 @@ import java.util.UUID;
  * line totals; {@code currency} is the single shared currency of all lines.
  */
 public record ReservationResponse(
-    UUID orderId,
-    String status,
-    List<Line> items,
-    String currency,
-    BigDecimal subtotal) {
+    UUID orderId, String status, List<Line> items, String currency, BigDecimal subtotal) {
 
   public record Line(
       Long productId,

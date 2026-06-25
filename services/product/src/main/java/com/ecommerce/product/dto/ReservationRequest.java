@@ -8,8 +8,7 @@ import java.util.List;
 import java.util.UUID;
 
 /** Internal reserve request from Order: an order UUID plus the lines to reserve. */
-public record ReservationRequest(
-    @NotNull UUID orderId, @NotEmpty @Valid List<Item> items) {
+public record ReservationRequest(@NotNull UUID orderId, @NotEmpty @Valid List<Item> items) {
 
   public record Item(@NotNull Long productId, @NotNull @Min(1) Integer quantity) {}
 }

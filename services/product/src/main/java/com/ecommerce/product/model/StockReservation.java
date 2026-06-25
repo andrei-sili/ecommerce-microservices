@@ -15,8 +15,8 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 /**
  * One reserved line of an order's stock reservation. {@code products.reserved_quantity} is the
- * running sum of {@code RESERVED} rows; a {@code RELEASED} row no longer counts toward it.
- * {@code (order_id, product_id)} is unique so a replayed reservation is idempotent.
+ * running sum of {@code RESERVED} rows; a {@code RELEASED} row no longer counts toward it. {@code
+ * (order_id, product_id)} is unique so a replayed reservation is idempotent.
  */
 @Entity
 @Table(name = "stock_reservations")

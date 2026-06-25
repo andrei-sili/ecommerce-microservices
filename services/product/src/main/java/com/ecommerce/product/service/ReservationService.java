@@ -22,9 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Reserve and release stock for orders (internal, system-to-system). Reserve is atomic and
- * all-or-nothing: every product row is locked {@code FOR UPDATE} before its availability is checked,
- * so concurrent reservations on the same product cannot oversell. Both operations are idempotent on
- * {@code order_id}.
+ * all-or-nothing: every product row is locked {@code FOR UPDATE} before its availability is
+ * checked, so concurrent reservations on the same product cannot oversell. Both operations are
+ * idempotent on {@code order_id}.
  */
 @Service
 public class ReservationService {

@@ -13,11 +13,11 @@ import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
- * Gate for the internal reservation endpoints ({@code /api/v1/inventory/reservations**}). Requires a
- * shared {@code X-Internal-Api-Key} that equals the configured {@code INTERNAL_API_KEY} (system call,
- * not a user JWT and not the ADMIN role). The comparison is constant-time to avoid leaking the key
- * through timing. A missing or wrong key is rejected with the standard 401 error body; the key is
- * never echoed.
+ * Gate for the internal reservation endpoints ({@code /api/v1/inventory/reservations**}). Requires
+ * a shared {@code X-Internal-Api-Key} that equals the configured {@code INTERNAL_API_KEY} (system
+ * call, not a user JWT and not the ADMIN role). The comparison is constant-time to avoid leaking
+ * the key through timing. A missing or wrong key is rejected with the standard 401 error body; the
+ * key is never echoed.
  */
 public class InternalApiKeyFilter extends OncePerRequestFilter {
 
