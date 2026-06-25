@@ -124,9 +124,17 @@ public class OrderService {
     return OrderResponse.from(loadOwned(user, orderId));
   }
 
-  /** Cancel: PENDING -> CANCELLED only; releases the reservation. Any other state -> 409. */
+  /**
+   * Cancel transition. PENDING -> CANCELLED releases the reservation and returns the order. Already
+   * CANCELLED is an idempotent no-op (200, no second release) so a retry is safe. Any other state
+   * (e.g. a future PAID) genuinely cannot be cancelled -> 409.
+   */
   public OrderResponse cancelOrder(CurrentUser user, UUID orderId) {
     OrderEntity order = loadOwned(user, orderId);
+    if (order.getStatus() == OrderStatus.CANCELLED) {
+      // Retry of an already-cancelled order: return as-is, do not release the reservation again.
+      return OrderResponse.from(order);
+    }
     if (order.getStatus() != OrderStatus.PENDING) {
       throw new OrderNotCancellableException();
     }

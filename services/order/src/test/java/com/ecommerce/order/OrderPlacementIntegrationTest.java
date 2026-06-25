@@ -307,7 +307,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
   }
 
   @Test
-  void cancelOrder_alreadyCancelled_returns409() throws Exception {
+  void cancelOrder_alreadyCancelled_isIdempotent_returns200_releasesAtMostOnce() throws Exception {
     UUID orderId = placeOrderFor();
     mockMvc
         .perform(
@@ -315,16 +315,23 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
-        .andExpect(status().isOk());
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("CANCELLED"));
 
+    // Retry of cancel on an already-CANCELLED order: 200 with the order, no second release.
     mockMvc
         .perform(
             patch("/api/v1/orders/" + orderId)
                 .header("Authorization", USER)
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.error").value("ORDER_NOT_CANCELLABLE"));
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+    assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
+        .isEqualTo(OrderStatus.CANCELLED);
+    // Idempotent: the reservation release happened exactly once across both PATCH calls.
+    verify(reservationClient, times(1)).release(orderId);
   }
 
   @Test
