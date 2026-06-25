@@ -1,6 +1,6 @@
-# Wave 0 — databases only (database-per-service pattern).
+# Wave 1 — databases (database-per-service) + User and Product app services.
 # One Postgres container per service DB on a shared Docker network.
-# Application services arrive in Wave 1+. Do NOT add Kong/Consul/RabbitMQ here.
+# Do NOT add Kong/Consul/RabbitMQ here — those arrive in later waves.
 
 name: ecommerce
 
@@ -130,6 +130,60 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # --- Application services (Wave 1) ---
+
+  user-service:
+    build:
+      context: ../services/user
+    image: ecommerce/user-service:dev
+    container_name: ecommerce-user-service
+    restart: unless-stopped
+    depends_on:
+      user-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/${USER_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${USER_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    ports:
+      - "8081:8081"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  product-service:
+    build:
+      context: ../services/product
+    image: ecommerce/product-service:dev
+    container_name: ecommerce-product-service
+    restart: unless-stopped
+    depends_on:
+      product-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://product-db:5432/${PRODUCT_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${PRODUCT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "8082:8082"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
 networks:
   ecommerce-net:
