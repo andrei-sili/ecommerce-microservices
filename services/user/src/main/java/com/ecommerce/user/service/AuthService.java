@@ -26,6 +26,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AuthService {
 
+  // Well-formed cost-10 BCrypt hash of a throwaway value. Used on the unknown-email path so a real
+  // BCrypt computation runs (uniform timing) instead of matches() short-circuiting on a bad hash,
+  // which would otherwise leak email existence via timing.
+  private static final String DUMMY_BCRYPT_HASH =
+      "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LPVNugaaaaa";
+
   private final UserRepository userRepository;
   private final RefreshTokenRepository refreshTokenRepository;
   private final PasswordEncoder passwordEncoder;
@@ -68,9 +74,9 @@ public class AuthService {
   public TokenResponse login(LoginRequest request) {
     String email = normalizeEmail(request.email());
     Optional<User> maybeUser = userRepository.findByEmail(email);
-    // Always run a hash comparison to keep timing uniform and avoid user enumeration.
+    // Always run a real hash comparison to keep timing uniform and avoid user enumeration.
     if (maybeUser.isEmpty()) {
-      passwordEncoder.matches(request.password(), "$2a$10$invalidinvalidinvalidinvalidinvalidi");
+      passwordEncoder.matches(request.password(), DUMMY_BCRYPT_HASH);
       throw new InvalidCredentialsException();
     }
     User user = maybeUser.get();
