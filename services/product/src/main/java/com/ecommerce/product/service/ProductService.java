@@ -34,8 +34,8 @@ public class ProductService {
   @Transactional(readOnly = true)
   public PageResponse<ProductResponse> list(String categorySlug, String q, Pageable pageable) {
     String slug = StringUtils.hasText(categorySlug) ? categorySlug : null;
-    String search = StringUtils.hasText(q) ? q : null;
-    Page<Product> page = productRepository.search(slug, search, pageable);
+    String qPattern = StringUtils.hasText(q) ? "%" + q.trim().toLowerCase() + "%" : null;
+    Page<Product> page = productRepository.search(slug, qPattern, pageable);
     return PageResponse.of(page, page.map(ProductResponse::from).getContent());
   }
 
