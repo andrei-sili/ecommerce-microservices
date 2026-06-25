@@ -109,7 +109,8 @@ class CartIntegrationTest extends AbstractIntegrationTest {
         .andExpect(jsonPath("$.items.length()").value(2))
         .andExpect(jsonPath("$.total_items").value(6));
 
-    // Set product 42 to an absolute quantity of 1 (idempotent PUT).
+    // Set product 42 to an absolute quantity of 1 (idempotent PUT). Items keep insertion order
+    // (id ASC), so product 42 is index 0 and product 43 is index 1.
     mockMvc
         .perform(
             put("/api/v1/cart/items/42")
@@ -117,7 +118,8 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":1}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items[?(@.product_id==42)].quantity").value(List.of(1)));
+        .andExpect(jsonPath("$.items[0].product_id").value(42))
+        .andExpect(jsonPath("$.items[0].quantity").value(1));
     // Repeating the same PUT yields the same state.
     mockMvc
         .perform(
@@ -126,7 +128,8 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":1}"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.items[?(@.product_id==42)].quantity").value(List.of(1)));
+        .andExpect(jsonPath("$.items[0].product_id").value(42))
+        .andExpect(jsonPath("$.items[0].quantity").value(1));
 
     // Remove product 42, idempotent.
     mockMvc
