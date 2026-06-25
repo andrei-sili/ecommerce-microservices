@@ -1,0 +1,31 @@
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 0
+
+security:
+  jwt:
+    secret: test-secret-that-is-long-enough-for-hs256-1234567890
+
+clients:
+  cart:
+    base-url: http://cart.test
+  product:
+    base-url: http://product.test
+    internal-api-key: test-internal-api-key
+  connect-timeout-ms: 2000
+  read-timeout-ms: 5000
