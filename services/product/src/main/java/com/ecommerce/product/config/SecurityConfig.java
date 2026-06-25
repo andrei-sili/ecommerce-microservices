@@ -20,8 +20,14 @@ import org.springframework.util.StringUtils;
 @Configuration
 public class SecurityConfig {
 
-  /** Path prefix of the internal reservation endpoints, gated by the shared internal API key. */
-  private static final String RESERVATIONS_PATH = "/api/v1/inventory/reservations/**";
+  /**
+   * The internal reservation endpoints, gated by the shared internal API key. Both the base path
+   * (POST) and sub-paths (DELETE /{orderId}) are listed explicitly so the broad write rules below
+   * never apply to them regardless of how {@code /**} treats the trailing segment.
+   */
+  private static final String[] RESERVATIONS_PATHS = {
+    "/api/v1/inventory/reservations", "/api/v1/inventory/reservations/**"
+  };
 
   private final JwtService jwtService;
   private final RestAuthenticationEntryPoint authenticationEntryPoint;
@@ -57,7 +63,7 @@ public class SecurityConfig {
                     // Internal reservation endpoints are gated by the X-Internal-Api-Key filter,
                     // not by JWT/ADMIN. Permit them here so the broad write rules below don't force
                     // ADMIN; the InternalApiKeyFilter (added before the JWT filter) is the gate.
-                    .requestMatchers(RESERVATIONS_PATH)
+                    .requestMatchers(RESERVATIONS_PATHS)
                     .permitAll()
                     // Reads are public.
                     .requestMatchers(HttpMethod.GET, "/api/v1/**")
@@ -81,8 +87,7 @@ public class SecurityConfig {
             new JwtAuthenticationFilter(jwtService), UsernamePasswordAuthenticationFilter.class)
         // Runs before the JWT filter; only acts on the reservation paths (see shouldNotFilter).
         .addFilterBefore(
-            new InternalApiKeyFilter(internalApiKey, objectMapper),
-            JwtAuthenticationFilter.class);
+            new InternalApiKeyFilter(internalApiKey, objectMapper), JwtAuthenticationFilter.class);
 
     return http.build();
   }
