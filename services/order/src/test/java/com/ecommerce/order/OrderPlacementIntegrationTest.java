@@ -270,7 +270,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
   }
 
   @Test
-  void listOrders_returnsOnlyCallersOrders_newestFirst() throws Exception {
+  void listOrders_returnsOnlyCallersOrders_withItems() throws Exception {
     placeOrderFor("key-list-1");
     placeOrderFor("key-list-2");
 
@@ -278,12 +278,43 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.total_elements").value(2))
-        .andExpect(jsonPath("$.content.length()").value(2));
+        .andExpect(jsonPath("$.content.length()").value(2))
+        // Items are batch-loaded for the page; the list response keeps the full per-order shape.
+        .andExpect(jsonPath("$.content[0].items.length()").value(1))
+        .andExpect(jsonPath("$.content[0].items[0].product_id").value(42))
+        .andExpect(jsonPath("$.content[1].items[0].product_id").value(42));
 
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", OTHER_USER))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.total_elements").value(0));
+  }
+
+  @Test
+  void listOrders_paginatesInSql_newestFirst() throws Exception {
+    placeOrderFor("key-page-1");
+    Thread.sleep(10); // ensure distinct created_at so newest-first ordering is deterministic
+    placeOrderFor("key-page-2");
+    Thread.sleep(10);
+    UUID newest = placeOrderFor("key-page-3");
+
+    // First page of size 2 must hold the two newest orders, newest first, with items populated.
+    mockMvc
+        .perform(get("/api/v1/orders?page=0&size=2").header("Authorization", USER))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.total_elements").value(3))
+        .andExpect(jsonPath("$.total_pages").value(2))
+        .andExpect(jsonPath("$.size").value(2))
+        .andExpect(jsonPath("$.content.length()").value(2))
+        .andExpect(jsonPath("$.content[0].id").value(newest.toString()))
+        .andExpect(jsonPath("$.content[0].items[0].product_id").value(42));
+
+    // Second page holds the single oldest order.
+    mockMvc
+        .perform(get("/api/v1/orders?page=1&size=2").header("Authorization", USER))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.page").value(1))
+        .andExpect(jsonPath("$.content.length()").value(1));
   }
 
   // ---- Cancel ----

@@ -112,9 +112,15 @@ public class OrderService {
 
   @Transactional(readOnly = true)
   public PageResponse<OrderResponse> listOrders(CurrentUser user, int page, int size) {
+    // Page the order rows in SQL (no collection fetch -> real LIMIT/OFFSET, no in-memory paging).
     Page<OrderEntity> orders =
         orderRepository.findByUserId(
             user.userId(), PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
+    if (!orders.isEmpty()) {
+      // Batch-load items for just this page's orders; this initializes the LAZY collections on the
+      // already-loaded page entities within the same persistence context (one extra query).
+      orderRepository.fetchItems(orders.getContent().stream().map(OrderEntity::getId).toList());
+    }
     List<OrderResponse> content = orders.getContent().stream().map(OrderResponse::from).toList();
     return PageResponse.of(orders, content);
   }
