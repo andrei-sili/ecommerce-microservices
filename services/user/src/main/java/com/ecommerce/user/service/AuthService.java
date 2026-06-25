@@ -84,9 +84,7 @@ public class AuthService {
   public TokenResponse refresh(RefreshRequest request) {
     String hash = tokenHasher.hash(request.refreshToken());
     RefreshToken stored =
-        refreshTokenRepository
-            .findByTokenHash(hash)
-            .orElseThrow(InvalidRefreshTokenException::new);
+        refreshTokenRepository.findByTokenHash(hash).orElseThrow(InvalidRefreshTokenException::new);
     if (!stored.isActive(Instant.now())) {
       throw new InvalidRefreshTokenException();
     }

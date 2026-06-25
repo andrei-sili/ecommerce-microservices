@@ -2,8 +2,8 @@ package com.ecommerce.user.security;
 
 import com.ecommerce.user.config.JwtProperties;
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;

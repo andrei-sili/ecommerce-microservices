@@ -146,7 +146,10 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
             .andReturn();
 
     String newRefresh =
-        objectMapper.readTree(rotated.getResponse().getContentAsString()).get("refresh_token").asText();
+        objectMapper
+            .readTree(rotated.getResponse().getContentAsString())
+            .get("refresh_token")
+            .asText();
     org.junit.jupiter.api.Assertions.assertNotEquals(oldRefresh, newRefresh);
 
     // Old (rotated) token must now be rejected.
@@ -204,7 +207,10 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
             put("/api/v1/users/me/password")
                 .header("Authorization", "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"current_password\":\"" + VALID_PASSWORD + "\",\"new_password\":\"BrandN3wPass99\"}"))
+                .content(
+                    "{\"current_password\":\""
+                        + VALID_PASSWORD
+                        + "\",\"new_password\":\"BrandN3wPass99\"}"))
         .andExpect(status().isNoContent());
 
     // Existing refresh token must be revoked after a password change.
@@ -234,7 +240,8 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
             put("/api/v1/users/me/password")
                 .header("Authorization", "Bearer " + access)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"current_password\":\"WrongCurrent12\",\"new_password\":\"BrandN3wPass99\"}"))
+                .content(
+                    "{\"current_password\":\"WrongCurrent12\",\"new_password\":\"BrandN3wPass99\"}"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.error", is("INVALID_CREDENTIALS")));
   }
@@ -273,7 +280,13 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
   }
 
   private String registerBody(String email, String password, String name) {
-    return "{\"email\":\"" + email + "\",\"password\":\"" + password + "\",\"name\":\"" + name + "\"}";
+    return "{\"email\":\""
+        + email
+        + "\",\"password\":\""
+        + password
+        + "\",\"name\":\""
+        + name
+        + "\"}";
   }
 
   private String loginBody(String email, String password) {

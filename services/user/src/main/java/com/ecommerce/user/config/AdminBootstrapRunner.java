@@ -50,7 +50,8 @@ public class AdminBootstrapRunner implements ApplicationRunner {
       log.warn("Admin bootstrap skipped: ADMIN_EMAIL already exists as a non-admin account");
       return;
     }
-    User admin = new User(email, passwordEncoder.encode(properties.password()), "Administrator", "ADMIN");
+    User admin =
+        new User(email, passwordEncoder.encode(properties.password()), "Administrator", "ADMIN");
     userRepository.save(admin);
     log.info("Admin bootstrap: seeded initial ADMIN account");
   }
