@@ -120,6 +120,22 @@
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
 
+      <!--
+        Run the Testcontainers integration tests (*IT) under `mvn test` alongside the unit tests,
+        so the reservation/catalog suites are part of the standard gate (they self-skip cleanly
+        when Docker is unavailable, see AbstractIntegrationTest).
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <includes>
+            <include>**/*Test.java</include>
+            <include>**/*IT.java</include>
+          </includes>
+        </configuration>
+      </plugin>
+
       <plugin>
         <groupId>com.diffplug.spotless</groupId>
         <artifactId>spotless-maven-plugin</artifactId>

@@ -44,7 +44,11 @@ import org.springframework.test.web.servlet.MockMvc;
   RestAccessDeniedHandler.class,
   com.ecommerce.product.exception.GlobalExceptionHandler.class
 })
-@TestPropertySource(properties = "security.jwt.secret=" + TestJwt.SECRET)
+@TestPropertySource(
+    properties = {
+      "security.jwt.secret=" + TestJwt.SECRET,
+      "security.internal-api-key=test-internal-api-key"
+    })
 class ProductControllerWebTest {
 
   @Autowired private MockMvc mockMvc;
