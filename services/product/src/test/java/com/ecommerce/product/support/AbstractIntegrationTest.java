@@ -21,6 +21,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @AutoConfigureMockMvc
 public abstract class AbstractIntegrationTest {
 
+  /** Internal API key wired into the test context; reservation tests send it via the header. */
+  public static final String INTERNAL_API_KEY = "test-internal-api-key";
+
   static final PostgreSQLContainer<?> POSTGRES =
       new PostgreSQLContainer<>("postgres:16-alpine")
           .withDatabaseName("product_db")
@@ -53,5 +56,6 @@ public abstract class AbstractIntegrationTest {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
+    registry.add("security.internal-api-key", () -> INTERNAL_API_KEY);
   }
 }
