@@ -8,7 +8,7 @@ Covers:
   5. PaymentCancelled → creates a PAYMENT_CANCELLED notification.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -31,7 +31,7 @@ from app.services.event_handlers import (
     handle_payment_failed,
 )
 
-NOW = datetime(2026, 6, 26, 10, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 6, 26, 10, 0, 0, tzinfo=UTC)
 
 
 def _order_placed(order_id: str = "ord-001") -> OrderPlacedEvent:
@@ -91,9 +91,7 @@ def _payment_cancelled(payment_id: str = "pay-003") -> PaymentCancelledEvent:
 
 
 async def _count_notifications(session: AsyncSession, dedup_key: str) -> int:
-    result = await session.execute(
-        select(func.count()).where(Notification.dedup_key == dedup_key)
-    )
+    result = await session.execute(select(func.count()).where(Notification.dedup_key == dedup_key))
     return result.scalar_one()
 
 
