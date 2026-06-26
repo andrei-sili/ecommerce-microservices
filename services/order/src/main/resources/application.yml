@@ -26,6 +26,9 @@ spring:
     password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: ${RABBITMQ_VHOST:/}
     publisher-confirm-type: simple
+    listener:
+      simple:
+        acknowledge-mode: manual
 
 server:
   port: ${SERVER_PORT:8084}

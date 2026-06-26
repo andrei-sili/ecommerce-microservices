@@ -22,6 +22,7 @@ spring:
     dynamic: false
     listener:
       simple:
+        acknowledge-mode: manual
         # Listener containers are not started; tests call consumer methods directly.
         auto-startup: false
 
