@@ -5,18 +5,13 @@ import com.ecommerce.payment.client.OrderView;
 import com.ecommerce.payment.dto.CreatePaymentRequest;
 import com.ecommerce.payment.dto.PaymentResponse;
 import com.ecommerce.payment.dto.WebhookEventRequest;
-import com.ecommerce.payment.event.OutboxService;
 import com.ecommerce.payment.exception.ApiException;
 import com.ecommerce.payment.gateway.GatewayChargeRequest;
 import com.ecommerce.payment.gateway.GatewayChargeResult;
 import com.ecommerce.payment.gateway.PaymentGatewayClient;
 import com.ecommerce.payment.model.Payment;
 import com.ecommerce.payment.model.PaymentStatus;
-import com.ecommerce.payment.model.PaymentTransaction;
-import com.ecommerce.payment.model.ProcessedWebhookEvent;
-import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.repository.PaymentRepository;
-import com.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.security.CurrentUser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +21,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import javax.crypto.Mac;
@@ -35,22 +29,24 @@ import org.apache.commons.codec.binary.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Orchestrates the payment flow. It owns no DB transaction: every persistence step is delegated to
+ * {@link PaymentPersistenceService} so the remote gateway call is never wrapped in an open
+ * transaction (saga rule) and the proxy-based {@code @Transactional} boundary actually applies.
+ */
 @Service
 public class PaymentService {
 
   private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
 
-  private static final String GATEWAY_NAME = "sandbox";
-
   private final PaymentRepository paymentRepository;
-  private final PaymentTransactionRepository transactionRepository;
   private final ProcessedWebhookEventRepository webhookEventRepository;
-  private final OutboxEventRepository outboxEventRepository;
-  private final OutboxService outboxService;
+  private final PaymentPersistenceService persistence;
   private final PaymentGatewayClient gatewayClient;
   private final OrderClient orderClient;
   private final ObjectMapper objectMapper;
@@ -58,19 +54,15 @@ public class PaymentService {
 
   public PaymentService(
       PaymentRepository paymentRepository,
-      PaymentTransactionRepository transactionRepository,
       ProcessedWebhookEventRepository webhookEventRepository,
-      OutboxEventRepository outboxEventRepository,
-      OutboxService outboxService,
+      PaymentPersistenceService persistence,
       PaymentGatewayClient gatewayClient,
       OrderClient orderClient,
       ObjectMapper objectMapper,
       @Value("${security.webhook.secret}") String webhookSecret) {
     this.paymentRepository = paymentRepository;
-    this.transactionRepository = transactionRepository;
     this.webhookEventRepository = webhookEventRepository;
-    this.outboxEventRepository = outboxEventRepository;
-    this.outboxService = outboxService;
+    this.persistence = persistence;
     this.gatewayClient = gatewayClient;
     this.orderClient = orderClient;
     this.objectMapper = objectMapper;
@@ -93,9 +85,7 @@ public class PaymentService {
     // (1) Idempotency fast path: a replayed key returns the original outcome verbatim.
     Optional<Payment> existing = paymentRepository.findByIdempotencyKey(idempotencyKey);
     if (existing.isPresent()) {
-      Payment p = existing.get();
-      // Return the same status so the controller can mirror the original HTTP status code.
-      return new CreateResult(PaymentResponse.from(p), true);
+      return new CreateResult(PaymentResponse.from(existing.get()), true);
     }
 
     // (2) Load the order via Order Service, forwarding the caller's JWT for ownership check.
@@ -116,87 +106,49 @@ public class PaymentService {
     // (5) Compute minor units (integer cents) from the server-authoritative order total.
     long amountMinorUnits = toMinorUnits(order.total());
 
-    // (6) Charge the gateway (no DB transaction open during this remote call).
+    // (6) Reserve a PENDING row BEFORE charging. Concurrent attempts on the same order collide on
+    // the active-payment unique index here, so the gateway is charged at most once per order.
+    Payment reserved;
+    try {
+      reserved =
+          persistence.reservePending(
+              caller.userId(),
+              request.getOrderId(),
+              order.total(),
+              order.currency(),
+              request.getPaymentMethodToken(),
+              idempotencyKey);
+    } catch (DataIntegrityViolationException e) {
+      // Same idempotency key won the race -> replay its outcome.
+      Optional<Payment> replay = paymentRepository.findByIdempotencyKey(idempotencyKey);
+      if (replay.isPresent()) {
+        return new CreateResult(PaymentResponse.from(replay.get()), true);
+      }
+      // Otherwise another in-flight payment holds this order (active-payment unique index).
+      throw new ApiException(
+          HttpStatus.CONFLICT,
+          "ORDER_PAYMENT_IN_PROGRESS",
+          "Another payment for this order is already in progress");
+    }
+
+    // (7) Charge the gateway (no DB transaction open during this remote call).
     GatewayChargeRequest chargeReq =
         new GatewayChargeRequest(
-            UUID.randomUUID(), request.getPaymentMethodToken(), amountMinorUnits, order.currency());
+            reserved.getId(), request.getPaymentMethodToken(), amountMinorUnits, order.currency());
     GatewayChargeResult result = gatewayClient.charge(chargeReq);
 
     if (result.gatewayError()) {
-      // Transient gateway error: no terminal state persisted; idempotency key allows safe retry.
+      // Transient gateway error: release the reservation so the order and key can be retried.
+      persistence.releaseReservation(reserved.getId());
       throw new ApiException(
           HttpStatus.BAD_GATEWAY,
           "PAYMENT_GATEWAY_ERROR",
           "Payment gateway is temporarily unavailable");
     }
 
-    // (7) Persist payment + transaction + outbox event in one atomic transaction.
-    Payment payment =
-        persistPaymentResult(
-            caller.userId(),
-            request.getOrderId(),
-            order.total(),
-            order.currency(),
-            request.getPaymentMethodToken(),
-            idempotencyKey,
-            result);
-
-    boolean succeeded = payment.getStatus() == PaymentStatus.SUCCEEDED;
+    // (8) Finalize: status transition + audit transaction + outbox event, atomically.
+    Payment payment = persistence.finalizePayment(reserved.getId(), result);
     return new CreateResult(PaymentResponse.from(payment), false);
-  }
-
-  @Transactional
-  protected Payment persistPaymentResult(
-      Long userId,
-      UUID orderId,
-      BigDecimal amount,
-      String currency,
-      String paymentMethodToken,
-      String idempotencyKey,
-      GatewayChargeResult result) {
-
-    PaymentStatus status = result.approved() ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED;
-    Payment payment =
-        new Payment(
-            orderId,
-            userId,
-            amount,
-            currency,
-            status,
-            GATEWAY_NAME,
-            paymentMethodToken,
-            idempotencyKey);
-    if (result.gatewayPaymentId() != null) {
-      payment.setGatewayPaymentId(result.gatewayPaymentId());
-    }
-    if (result.failureReason() != null) {
-      payment.setFailureReason(result.failureReason());
-    }
-    paymentRepository.save(payment);
-
-    // Audit transaction (no card data).
-    String txType = result.approved() ? "CAPTURE" : "AUTHORIZE";
-    transactionRepository.save(
-        new PaymentTransaction(
-            payment.getId(),
-            txType,
-            status.name(),
-            amount,
-            currency,
-            result.gatewayPaymentId(),
-            result.approved()
-                ? "Payment captured"
-                : "Payment declined: " + result.failureReason()));
-
-    // Outbox event in the same transaction.
-    Instant occurredAt = Instant.now();
-    if (result.approved()) {
-      outboxService.recordPaymentCompleted(payment, occurredAt);
-    } else {
-      outboxService.recordPaymentFailed(payment, occurredAt);
-    }
-
-    return payment;
   }
 
   @Transactional(readOnly = true)
@@ -223,9 +175,8 @@ public class PaymentService {
   }
 
   /**
-   * Process a gateway webhook. The raw body MUST already have been verified (HMAC-SHA256) by the
-   * caller before this method is invoked. Any state transition writes to the outbox in the same
-   * transaction.
+   * Process a gateway webhook. The raw body MUST be verified (HMAC-SHA256) before parsing. Any
+   * state transition is applied atomically by {@link PaymentPersistenceService}.
    *
    * @param rawBody verified raw request bytes
    * @param signature the {@code X-Webhook-Signature} header value
@@ -243,144 +194,21 @@ public class PaymentService {
     }
 
     if (event.getEventId() == null || event.getEventId().isBlank()) {
-      log.warn("Webhook received without event_id — skipping");
+      log.warn("Webhook received without event_id -- skipping");
       return;
     }
 
-    // Idempotency: skip duplicate webhook deliveries.
+    // Idempotency fast path: skip duplicate webhook deliveries before opening a transaction.
     if (webhookEventRepository.existsById(event.getEventId())) {
-      log.debug("Duplicate webhook event {} — skipping", event.getEventId());
+      log.debug("Duplicate webhook event {} -- skipping", event.getEventId());
       return;
     }
 
-    processVerifiedWebhookEvent(event);
-  }
-
-  @Transactional
-  protected void processVerifiedWebhookEvent(WebhookEventRequest event) {
-    // Already checked idempotency outside the transaction; re-check inside for race safety.
-    if (webhookEventRepository.existsById(event.getEventId())) {
-      return;
-    }
-
-    Payment payment = findPaymentByGatewayId(event.getGatewayPaymentId());
-    if (payment == null) {
-      log.warn(
-          "Webhook {} references unknown gateway payment id {} — acking without processing",
-          event.getEventId(),
-          event.getGatewayPaymentId());
-      // Record so we don't re-process; associate with a zero UUID since we have no payment id.
-      webhookEventRepository.save(new ProcessedWebhookEvent(event.getEventId(), new UUID(0, 0)));
-      return;
-    }
-
-    // Amount + currency integrity check (defense-in-depth).
-    if (event.getAmount() != null && event.getCurrency() != null) {
-      boolean amountMismatch =
-          event.getAmount().compareTo(payment.getAmount()) != 0
-              || !event.getCurrency().equalsIgnoreCase(payment.getCurrency());
-      if (amountMismatch) {
-        log.error(
-            "RECONCILIATION: webhook {} amount/currency mismatch for payment {} — routing to DLQ",
-            event.getEventId(),
-            payment.getId());
-        // Do NOT update state. Record the event to stop retries, but flag it.
-        webhookEventRepository.save(new ProcessedWebhookEvent(event.getEventId(), payment.getId()));
-        throw new ApiException(
-            HttpStatus.UNPROCESSABLE_ENTITY,
-            "AMOUNT_MISMATCH",
-            "Webhook amount/currency does not match stored payment");
-      }
-    }
-
-    Instant occurredAt = Instant.now();
-    String eventType = event.getEventType();
-
-    if ("payment_succeeded".equals(eventType)) {
-      transitionToSucceeded(payment, event, occurredAt);
-    } else if ("payment_failed".equals(eventType)) {
-      transitionToFailed(payment, event, occurredAt);
-    } else if ("payment_canceled".equals(eventType)) {
-      transitionToCancelled(payment, event, occurredAt);
-    } else {
-      log.info("Webhook {} has unknown event type {} — acking", event.getEventId(), eventType);
-    }
-
-    webhookEventRepository.save(new ProcessedWebhookEvent(event.getEventId(), payment.getId()));
-  }
-
-  private void transitionToSucceeded(Payment payment, WebhookEventRequest event, Instant now) {
-    if (payment.getStatus() == PaymentStatus.SUCCEEDED) {
-      return; // already in terminal state — idempotent no-op
-    }
-    if (payment.getStatus() != PaymentStatus.PENDING) {
-      log.warn("Webhook succeeded but payment {} is {}", payment.getId(), payment.getStatus());
-      return;
-    }
-    payment.setStatus(PaymentStatus.SUCCEEDED);
-    payment.setGatewayPaymentId(event.getGatewayPaymentId());
-    paymentRepository.save(payment);
-    logWebhookTransaction(payment, event, "SUCCEEDED");
-    outboxService.recordPaymentCompleted(payment, now);
-  }
-
-  private void transitionToFailed(Payment payment, WebhookEventRequest event, Instant now) {
-    if (payment.getStatus() == PaymentStatus.FAILED) {
-      return;
-    }
-    if (payment.getStatus() != PaymentStatus.PENDING) {
-      log.warn("Webhook failed but payment {} is {}", payment.getId(), payment.getStatus());
-      return;
-    }
-    payment.setStatus(PaymentStatus.FAILED);
-    if (event.getFailureReason() != null) {
-      payment.setFailureReason(event.getFailureReason());
-    }
-    paymentRepository.save(payment);
-    logWebhookTransaction(payment, event, "FAILED");
-    outboxService.recordPaymentFailed(payment, now);
-  }
-
-  private void transitionToCancelled(Payment payment, WebhookEventRequest event, Instant now) {
-    if (payment.getStatus() == PaymentStatus.CANCELLED) {
-      return;
-    }
-    if (payment.getStatus() != PaymentStatus.PENDING) {
-      log.warn("Webhook canceled but payment {} is {}", payment.getId(), payment.getStatus());
-      return;
-    }
-    payment.setStatus(PaymentStatus.CANCELLED);
-    paymentRepository.save(payment);
-    logWebhookTransaction(payment, event, "CANCELLED");
-    outboxService.recordPaymentCancelled(payment, now);
-  }
-
-  private void logWebhookTransaction(Payment payment, WebhookEventRequest event, String status) {
-    transactionRepository.save(
-        new PaymentTransaction(
-            payment.getId(),
-            "WEBHOOK",
-            status,
-            payment.getAmount(),
-            payment.getCurrency(),
-            event.getEventId(),
-            "Webhook: " + event.getEventType()));
-  }
-
-  private Payment findPaymentByGatewayId(String gatewayPaymentId) {
-    if (gatewayPaymentId == null) return null;
-    return paymentRepository.findByGatewayPaymentId(gatewayPaymentId).orElse(null);
+    persistence.processVerifiedWebhookEvent(event);
   }
 
   private void validateOrderPayable(OrderView order, UUID orderId) {
     String status = order.status();
-    if ("PAID".equals(status)) {
-      // Check DB for existing SUCCEEDED payment.
-      if (paymentRepository.existsByOrderIdAndStatus(orderId, PaymentStatus.SUCCEEDED)) {
-        throw new ApiException(
-            HttpStatus.CONFLICT, "ORDER_ALREADY_PAID", "This order has already been paid");
-      }
-    }
     if ("CANCELLED".equals(status) || "PAYMENT_FAILED".equals(status)) {
       throw new ApiException(
           HttpStatus.UNPROCESSABLE_ENTITY, "ORDER_NOT_PAYABLE", "Order is not in a payable state");
@@ -389,8 +217,7 @@ public class PaymentService {
       throw new ApiException(
           HttpStatus.UNPROCESSABLE_ENTITY, "ORDER_NOT_PAYABLE", "Order is not in a payable state");
     }
-    // Extra DB check: if a SUCCEEDED payment already exists for this order (regardless of order
-    // status), reject to prevent any double-charge path.
+    // Friendly pre-check; the active-payment unique index is the race-safe backstop.
     if (paymentRepository.existsByOrderIdAndStatus(orderId, PaymentStatus.SUCCEEDED)) {
       throw new ApiException(
           HttpStatus.CONFLICT, "ORDER_ALREADY_PAID", "This order has already been paid");
