@@ -16,6 +16,8 @@ import com.ecommerce.payment.model.PaymentStatus;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.repository.PaymentRepository;
+import com.ecommerce.payment.repository.PaymentTransactionRepository;
+import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.ecommerce.payment.support.TestJwt;
 import java.math.BigDecimal;
@@ -40,8 +42,7 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   private static final String USER_SUBJECT = "7";
   private static final Long USER_ID = 7L;
   private static final String USER = TestJwt.bearer(TestJwt.token(USER_SUBJECT, List.of("USER")));
-  private static final String OTHER_USER =
-      TestJwt.bearer(TestJwt.token("99", List.of("USER")));
+  private static final String OTHER_USER = TestJwt.bearer(TestJwt.token("99", List.of("USER")));
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
 
   /** Must match test application.yml security.webhook.secret */
@@ -50,6 +51,8 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private PaymentRepository paymentRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
+  @Autowired private PaymentTransactionRepository transactionRepository;
+  @Autowired private ProcessedWebhookEventRepository webhookEventRepository;
 
   // Mocked so no RabbitMQ connection is needed; we verify the outbox DB rows instead.
   @MockBean private OutboxRelay outboxRelay;
@@ -57,7 +60,10 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
 
   @BeforeEach
   void cleanDb() {
+    // Delete in FK-safe order: child tables first, then parent.
     outboxEventRepository.deleteAll();
+    webhookEventRepository.deleteAll();
+    transactionRepository.deleteAll();
     paymentRepository.deleteAll();
   }
 
@@ -122,8 +128,7 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   // ---- Declined token → 402 PAYMENT_DECLINED, persisted FAILED, PaymentFailed event ----
 
   @Test
-  void createPayment_declineToken_returns402_persistedFailed_paymentFailedEvent()
-      throws Exception {
+  void createPayment_declineToken_returns402_persistedFailed_paymentFailedEvent() throws Exception {
     UUID orderId = UUID.randomUUID();
     when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
 
@@ -140,7 +145,8 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
                         .formatted(orderId)))
         .andExpect(status().isPaymentRequired())
         .andExpect(jsonPath("$.status").value("FAILED"))
-        .andExpect(jsonPath("$.error").doesNotExist()); // body is payment object, not error envelope
+        .andExpect(
+            jsonPath("$.error").doesNotExist()); // body is payment object, not error envelope
 
     List<Payment> payments = paymentRepository.findAll();
     assertThat(payments).hasSize(1);
@@ -212,7 +218,10 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
             post("/api/v1/payments")
                 .header("Authorization", USER)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"order_id\":\"" + UUID.randomUUID() + "\",\"payment_method_token\":\"pm_x\"}"))
+                .content(
+                    "{\"order_id\":\""
+                        + UUID.randomUUID()
+                        + "\",\"payment_method_token\":\"pm_x\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("IDEMPOTENCY_KEY_REQUIRED"));
   }
@@ -412,8 +421,7 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     String paymentId = com.jayway.jsonpath.JsonPath.read(response, "$.id");
 
     mockMvc
-        .perform(
-            get("/api/v1/payments/" + paymentId).header("Authorization", USER))
+        .perform(get("/api/v1/payments/" + paymentId).header("Authorization", USER))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(paymentId));
   }
@@ -441,8 +449,7 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     String paymentId = com.jayway.jsonpath.JsonPath.read(response, "$.id");
 
     mockMvc
-        .perform(
-            get("/api/v1/payments/" + paymentId).header("Authorization", OTHER_USER))
+        .perform(get("/api/v1/payments/" + paymentId).header("Authorization", OTHER_USER))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.error").value("PAYMENT_NOT_FOUND"));
   }
