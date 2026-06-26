@@ -31,8 +31,8 @@ public class PaymentController {
   }
 
   /**
-   * Initiate payment for an order. The {@code Idempotency-Key} header is required: a replayed key
-   * returns the original outcome verbatim (same HTTP status + body), never charging twice.
+   * Initiate payment for an order. The {@code Idempotency-Key} header is required to prevent
+   * double-charges. A successful replay returns 200 (not 201); a declined replay returns 402.
    *
    * <p>A declined charge returns 402 with the standard error envelope extended with {@code
    * payment_id} and {@code failure_reason}. The FAILED payment is persisted and queryable via GET.

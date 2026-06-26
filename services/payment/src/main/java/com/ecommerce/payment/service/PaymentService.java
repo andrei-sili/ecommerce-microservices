@@ -91,6 +91,10 @@ public class PaymentService {
     // (1) Idempotency fast path: a replayed key returns the original outcome verbatim.
     Optional<Payment> existing = paymentRepository.findByIdempotencyKey(idempotencyKey);
     if (existing.isPresent()) {
+      // Scope replay to the caller: another user must not read this payment via the replay path.
+      if (!existing.get().getUserId().equals(caller.userId())) {
+        throw new ApiException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "Payment not found");
+      }
       return new CreateResult(PaymentResponse.from(existing.get()), true);
     }
 
@@ -135,6 +139,10 @@ public class PaymentService {
       // Same idempotency key won the race -> replay its outcome.
       Optional<Payment> replay = paymentRepository.findByIdempotencyKey(idempotencyKey);
       if (replay.isPresent()) {
+        // Same ownership check as the fast path.
+        if (!replay.get().getUserId().equals(caller.userId())) {
+          throw new ApiException(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "Payment not found");
+        }
         return new CreateResult(PaymentResponse.from(replay.get()), true);
       }
       // Otherwise another in-flight payment holds this order (active-payment unique index).
