@@ -1,6 +1,7 @@
-# Wave 1 — databases (database-per-service) + User and Product app services.
-# One Postgres container per service DB on a shared Docker network.
-# Do NOT add Kong/Consul/RabbitMQ here — those arrive in later waves.
+# Wave 3 — add RabbitMQ broker + Payment + Notification services.
+# Topology (exchanges/queues/DLQs) is declared idempotently by each service at
+# startup (Spring AMQP / aio-pika). No pre-loaded definitions file — RabbitMQ
+# boots with RABBITMQ_DEFAULT_USER/PASS and the services handle the rest.
 
 name: ecommerce
 
@@ -176,6 +177,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Product fails fast at startup if this is unset; Order sends it as X-Internal-Api-Key.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      # TTL for stock reservations; sweeper releases RESERVED rows past this deadline.
+      RESERVATION_TTL_MINUTES: ${RESERVATION_TTL_MINUTES}
     ports:
       - "8082:8082"
     networks:
@@ -225,6 +228,8 @@ services:
     depends_on:
       order-db:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/${ORDER_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${ORDER_DB_USER}
@@ -234,12 +239,111 @@ services:
       # Override the bare-hostname defaults with the compose DNS names.
       CART_SERVICE_URL: http://cart-service:8083
       PRODUCT_SERVICE_URL: http://product-service:8082
+      # RabbitMQ — outbox relay (OrderPlaced) + payment event consumer (Wave 3).
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
     ports:
       - "8084:8084"
     networks:
       - ecommerce-net
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8084/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # --- Wave 3: RabbitMQ broker + Payment + Notification ---
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: ecommerce-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  payment-service:
+    build:
+      context: ../services/payment
+    image: ecommerce/payment-service:dev
+    container_name: ecommerce-payment-service
+    restart: unless-stopped
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://payment-db:5432/${PAYMENT_DB_NAME}
+      SPRING_DATASOURCE_USERNAME: ${PAYMENT_DB_USER}
+      SPRING_DATASOURCE_PASSWORD: ${PAYMENT_DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET}
+      PAYMENT_GATEWAY_API_KEY: ${PAYMENT_GATEWAY_API_KEY}
+      # Payment calls Order with the user's forwarded JWT (user-scoped, not INTERNAL_API_KEY).
+      ORDER_SERVICE_URL: http://order-service:8084
+      # RabbitMQ — outbox relay (PaymentCompleted/Failed/Cancelled) (Wave 3).
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+    ports:
+      - "8085:8085"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8085/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  notification-service:
+    build:
+      context: ../services/notification
+    image: ecommerce/notification-service:dev
+    container_name: ecommerce-notification-service
+    restart: unless-stopped
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${NOTIFICATION_DB_USER}:${NOTIFICATION_DB_PASSWORD}@notification-db:5432/${NOTIFICATION_DB_NAME}
+      EMAIL_API_KEY: ${EMAIL_API_KEY}
+      # RabbitMQ — consumer: OrderPlaced + payment events (Wave 3).
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST}
+    ports:
+      - "8086:8086"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      # Uses stdlib urllib — no extra packages needed in any Python image.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8086/health')"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -257,3 +361,4 @@ volumes:
   cart-db-data:
   payment-db-data:
   notification-db-data:
+  rabbitmq-data:
