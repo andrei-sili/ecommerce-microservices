@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         shutdown_event = asyncio.Event()
         consumer_task = asyncio.create_task(
             run_consumer(
-                rabbitmq_url=settings.RABBITMQ_URL,
+                rabbitmq_url=settings.broker_url,
                 session_factory=session_factory,
                 sender=sender,
                 max_retries=settings.MAX_RETRIES,
