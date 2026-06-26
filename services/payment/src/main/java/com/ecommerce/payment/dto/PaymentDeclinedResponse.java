@@ -22,8 +22,7 @@ public class PaymentDeclinedResponse {
 
   private PaymentDeclinedResponse() {}
 
-  public static PaymentDeclinedResponse of(
-      String path, UUID paymentId, String failureReason) {
+  public static PaymentDeclinedResponse of(String path, UUID paymentId, String failureReason) {
     PaymentDeclinedResponse r = new PaymentDeclinedResponse();
     r.error = "PAYMENT_DECLINED";
     r.message = "Payment was declined: " + failureReason;

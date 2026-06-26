@@ -133,7 +133,8 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     assertThat(payload).contains("\"occurredAt\"");
   }
 
-  // ---- Declined token → 402 error envelope with payment_id + failure_reason, FAILED persisted ----
+  // ---- Declined token → 402 error envelope with payment_id + failure_reason, FAILED persisted
+  // ----
 
   @Test
   void createPayment_declineToken_returns402_errorEnvelope_persistedFailed_paymentFailedEvent()
@@ -556,7 +557,8 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   void createPayment_orderBelongsToAnotherUser_returns404_noExistenceLeak() throws Exception {
     UUID orderId = UUID.randomUUID();
     // Order Service returns the order for user 7 (USER_ID), but the request comes from user 99.
-    // OrderClient is mocked so we can test the local ownership guard independently of Order Service.
+    // OrderClient is mocked so we can test the local ownership guard independently of Order
+    // Service.
     when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
 
     mockMvc
@@ -632,7 +634,8 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     assertThat(outboxEventRepository.count()).isZero();
   }
 
-  // ---- Gateway error: PENDING reservation kept, same-key retry returns it without re-charging ----
+  // ---- Gateway error: PENDING reservation kept, same-key retry returns it without re-charging
+  // ----
 
   @Test
   void createPayment_gatewayError_returns502_keepsPendingReservation() throws Exception {
