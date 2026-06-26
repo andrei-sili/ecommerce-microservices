@@ -19,12 +19,10 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Internal (system-to-system) inventory reservation API. Authenticated by the {@code
  * X-Internal-Api-Key} header (see {@code InternalApiKeyFilter}), not a user JWT and not the ADMIN
- * role. Order reserves stock at placement and releases on cancellation/compensation.
+ * role.
  *
- * <p>Wave 3 forward-note (not implemented here): when {@code PaymentCompleted} arrives, the
- * reservation is committed via {@code POST /api/v1/inventory/reservations/{orderId}/commit}
- * (decrement both {@code stock_quantity} and {@code reserved_quantity}). Wave 2 only reserves and
- * releases.
+ * <p>Wave 3 adds the commit endpoint ({@code POST /{orderId}/commit}): Order calls this after
+ * receiving {@code PaymentCompleted} to permanently decrement stock.
  */
 @RestController
 @RequestMapping("/api/v1/inventory/reservations")
@@ -43,6 +41,16 @@ public class ReservationController {
     return ResponseEntity.created(
             URI.create("/api/v1/inventory/reservations/" + reservation.orderId()))
         .body(reservation);
+  }
+
+  /**
+   * Commit a reservation after payment: RESERVED → COMMITTED, stock permanently decremented.
+   * Idempotent: already committed → 200 no-op. 409 if the hold has expired/been released. 404 if no
+   * reservation exists for this order.
+   */
+  @PostMapping("/{orderId}/commit")
+  public ResponseEntity<ReservationResponse> commit(@PathVariable UUID orderId) {
+    return ResponseEntity.ok(reservationService.commit(orderId));
   }
 
   @DeleteMapping("/{orderId}")

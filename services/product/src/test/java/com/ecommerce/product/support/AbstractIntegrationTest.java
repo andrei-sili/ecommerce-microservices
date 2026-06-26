@@ -57,5 +57,9 @@ public abstract class AbstractIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
     registry.add("security.internal-api-key", () -> INTERNAL_API_KEY);
+    // Prevent the sweeper from firing automatically during tests: set both the initial delay and
+    // the fixed delay to ~292 million years so the @Scheduled trigger never runs. Tests that need
+    // the sweep logic call ReservationSweeper.sweep() directly.
+    registry.add("reservation.sweeper.delay-ms", () -> String.valueOf(Long.MAX_VALUE / 2));
   }
 }
