@@ -13,6 +13,18 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    # Prevents RabbitAdmin from connecting and declaring topology at startup.
+    dynamic: false
+    listener:
+      simple:
+        acknowledge-mode: manual
+        # Listener containers are not started; tests call consumer methods directly.
+        auto-startup: false
 
 server:
   port: 0
@@ -29,3 +41,12 @@ clients:
     internal-api-key: test-internal-api-key
   connect-timeout-ms: 2000
   read-timeout-ms: 5000
+
+# Disables @EnableScheduling in SchedulingConfig so the relay never fires during tests.
+# Relay tests call OutboxRelay.drain() directly.
+app:
+  scheduling:
+    enabled: false
+  outbox:
+    relay:
+      interval-ms: 1000
