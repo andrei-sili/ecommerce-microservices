@@ -5,7 +5,7 @@ CREATE TABLE payment_transactions (
     type             VARCHAR(30)  NOT NULL,  -- AUTHORIZE / CAPTURE / WEBHOOK / STATUS_CHANGE
     status           VARCHAR(20)  NOT NULL,
     amount           NUMERIC(12,2),
-    currency         CHAR(3),
+    currency         VARCHAR(3),
     gateway_event_id VARCHAR(100),
     detail           VARCHAR(255), -- machine-safe description; never card data or secrets
     created_at       TIMESTAMPTZ  NOT NULL DEFAULT now()

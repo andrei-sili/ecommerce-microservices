@@ -3,7 +3,7 @@ CREATE TABLE payments (
     order_id             UUID         NOT NULL,
     user_id              BIGINT       NOT NULL,
     amount               NUMERIC(12,2) NOT NULL,
-    currency             CHAR(3)      NOT NULL,
+    currency             VARCHAR(3)   NOT NULL,
     status               VARCHAR(20)  NOT NULL,
     gateway              VARCHAR(30)  NOT NULL,
     gateway_payment_id   VARCHAR(100),
