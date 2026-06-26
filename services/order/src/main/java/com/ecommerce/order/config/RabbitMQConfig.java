@@ -5,15 +5,15 @@ import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
-import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.listener.RabbitListenerContainerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Declares the broker topology owned by Order service and configures the listener container factory
- * with manual ack mode. All declarations are idempotent (declare-if-absent).
+ * Declares the broker topology owned by Order service. All declarations are idempotent
+ * (declare-if-absent). Acknowledge mode (manual) is configured via {@code
+ * spring.rabbitmq.listener.simple.acknowledge-mode} in application.yml so Boot's auto-configured
+ * {@code SimpleRabbitListenerContainerFactory} also picks up {@code auto-startup=false} from the
+ * test application.yml.
  */
 @Configuration
 public class RabbitMQConfig {
@@ -67,21 +67,5 @@ public class RabbitMQConfig {
   @Bean
   public Binding paymentEventsDlqBinding(Queue paymentEventsDlq, TopicExchange deadLetterExchange) {
     return BindingBuilder.bind(paymentEventsDlq).to(deadLetterExchange).with(PAYMENT_DLQ);
-  }
-
-  // ---- Container factory ----
-
-  /**
-   * Manual ack mode: the consumer calls {@code channel.basicAck/Nack} explicitly, ensuring the
-   * message is acked only after the side-effect transaction and inbox-dedup row commit.
-   */
-  @Bean
-  public RabbitListenerContainerFactory<?> rabbitListenerContainerFactory(
-      ConnectionFactory connectionFactory) {
-    SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-    factory.setConnectionFactory(connectionFactory);
-    factory.setAcknowledgeMode(
-        org.springframework.amqp.core.AcknowledgeMode.MANUAL);
-    return factory;
   }
 }
