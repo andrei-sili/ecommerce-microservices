@@ -107,7 +107,8 @@ public class ReservationService {
 
       product.setReservedQuantity(product.getReservedQuantity() + quantity);
       reservationRepository.save(
-          new StockReservation(orderId, productId, quantity, ReservationStatus.RESERVED, expiresAt));
+          new StockReservation(
+              orderId, productId, quantity, ReservationStatus.RESERVED, expiresAt));
       reservedLines.add(new ReservedLine(product, quantity));
     }
 
@@ -261,8 +262,7 @@ public class ReservationService {
     return buildResponse(orderId, ReservationStatus.COMMITTED.name(), responseLines);
   }
 
-  private ReservationResponse buildResponse(
-      UUID orderId, String status, List<ReservedLine> lines) {
+  private ReservationResponse buildResponse(UUID orderId, String status, List<ReservedLine> lines) {
     String currency = lines.isEmpty() ? null : lines.get(0).product().getCurrency();
     BigDecimal subtotal = BigDecimal.ZERO;
     List<ReservationResponse.Line> responseLines = new ArrayList<>();

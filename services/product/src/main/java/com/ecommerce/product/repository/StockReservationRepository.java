@@ -16,8 +16,8 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
   List<StockReservation> findByOrderId(UUID orderId);
 
   /**
-   * Loads and locks all reservation rows for an order ({@code SELECT … FOR UPDATE}). Used by
-   * commit to prevent concurrent commits from double-decrementing stock.
+   * Loads and locks all reservation rows for an order ({@code SELECT … FOR UPDATE}). Used by commit
+   * to prevent concurrent commits from double-decrementing stock.
    */
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select r from StockReservation r where r.orderId = :orderId")

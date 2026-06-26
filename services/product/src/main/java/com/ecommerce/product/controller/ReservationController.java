@@ -45,8 +45,8 @@ public class ReservationController {
 
   /**
    * Commit a reservation after payment: RESERVED → COMMITTED, stock permanently decremented.
-   * Idempotent: already committed → 200 no-op. 409 if the hold has expired/been released. 404 if
-   * no reservation exists for this order.
+   * Idempotent: already committed → 200 no-op. 409 if the hold has expired/been released. 404 if no
+   * reservation exists for this order.
    */
   @PostMapping("/{orderId}/commit")
   public ResponseEntity<ReservationResponse> commit(@PathVariable UUID orderId) {

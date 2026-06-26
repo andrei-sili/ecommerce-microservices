@@ -235,7 +235,8 @@ class ReservationLifecycleIT extends AbstractIntegrationTest {
 
           Instant alreadyExpired = Instant.now().minus(1, ChronoUnit.HOURS);
           StockReservation reservation =
-              new StockReservation(orderId, productId, 7, ReservationStatus.RESERVED, alreadyExpired);
+              new StockReservation(
+                  orderId, productId, 7, ReservationStatus.RESERVED, alreadyExpired);
           reservationRepository.save(reservation);
         });
 
