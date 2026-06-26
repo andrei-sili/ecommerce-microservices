@@ -2,6 +2,7 @@ package com.ecommerce.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ecommerce.payment.client.OrderClient;
 import com.ecommerce.payment.client.OrderView;
+import com.ecommerce.payment.event.OutboxService;
 import com.ecommerce.payment.model.OutboxEvent;
 import com.ecommerce.payment.model.Payment;
 import com.ecommerce.payment.model.PaymentStatus;
@@ -34,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -57,6 +60,9 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   // Mocked so no RabbitMQ connection is needed; we verify the outbox DB rows instead.
   @MockBean private OutboxRelay outboxRelay;
   @MockBean private OrderClient orderClient;
+
+  // Real by default (writes outbox rows); stubbed to throw only in the atomicity test.
+  @SpyBean private OutboxService outboxService;
 
   @BeforeEach
   void cleanDb() {
@@ -502,6 +508,145 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
                         .formatted(orderId)))
         .andExpect(status().isUnprocessableEntity())
         .andExpect(jsonPath("$.error").value("CURRENCY_MISMATCH"));
+  }
+
+  // ---- B-1: persistence atomicity (3 saves are all-or-nothing) ----
+
+  @Test
+  void createPayment_outboxWriteFails_noSucceededPaymentWithoutEvent() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    // Force the outbox write inside finalizePayment's transaction to fail after the charge.
+    doThrow(new RuntimeException("simulated outbox failure"))
+        .when(outboxService)
+        .recordPaymentCompleted(any(), any());
+
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-atomic")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_valid"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isInternalServerError());
+
+    // The finalize transaction rolled back: no SUCCEEDED payment, no audit row, no outbox event.
+    // (A charge is never recorded SUCCEEDED without its PaymentCompleted event.)
+    assertThat(paymentRepository.findAll())
+        .noneMatch(p -> p.getStatus() == PaymentStatus.SUCCEEDED);
+    assertThat(transactionRepository.count()).isZero();
+    assertThat(outboxEventRepository.count()).isZero();
+  }
+
+  // ---- Gateway error: reservation released, order/key free to retry ----
+
+  @Test
+  void createPayment_gatewayError_returns502_releasesReservation() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-gw-error")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_error_token"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.error").value("PAYMENT_GATEWAY_ERROR"));
+
+    // No terminal state persisted and the reservation was released (key can be retried).
+    assertThat(paymentRepository.findAll()).isEmpty();
+    assertThat(outboxEventRepository.count()).isZero();
+  }
+
+  // ---- M-2: a second in-flight charge on the same order is blocked before the gateway ----
+
+  @Test
+  void createPayment_concurrentDifferentKeySameOrder_returns409_chargesOnce() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    // Simulate a first request whose charge is in flight: a committed PENDING reservation.
+    paymentRepository.saveAndFlush(
+        new Payment(
+            orderId,
+            USER_ID,
+            new BigDecimal("39.98"),
+            "EUR",
+            PaymentStatus.PENDING,
+            "sandbox",
+            "pm_inflight",
+            "key-inflight"));
+
+    // A second request with a DIFFERENT key collides on the active-payment unique index.
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-second")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_valid"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.error").value("ORDER_PAYMENT_IN_PROGRESS"));
+
+    // Still exactly one (the reservation); the second never reached the gateway.
+    assertThat(paymentRepository.findAll()).hasSize(1);
+  }
+
+  // ---- M-1: a money event with no amount/currency cannot skip the re-verification guard ----
+
+  @Test
+  void webhook_succeededEventMissingAmount_returns422_integrityError() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+    mockMvc.perform(
+        post("/api/v1/payments")
+            .header("Authorization", USER)
+            .header("Idempotency-Key", "key-wh-noamount")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(
+                """
+                {"order_id":"%s","payment_method_token":"pm_wh_noamount"}
+                """
+                    .formatted(orderId)));
+
+    Payment payment = paymentRepository.findAll().get(0);
+    long outboxBefore = outboxEventRepository.count();
+
+    // payment_succeeded event referencing the real payment but WITHOUT amount/currency.
+    String body =
+        """
+        {"event_id":"evt_noamount_1","event_type":"payment_succeeded","gateway_payment_id":"%s"}
+        """
+            .formatted(payment.getGatewayPaymentId());
+    String sig = computeHmac(body, WEBHOOK_SECRET);
+
+    mockMvc
+        .perform(
+            post("/api/v1/payments/webhook")
+                .header("X-Webhook-Signature", sig)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isUnprocessableEntity())
+        .andExpect(jsonPath("$.error").value("WEBHOOK_INTEGRITY_ERROR"));
+
+    // Guard rolled back: event not marked processed, no extra outbox event emitted.
+    assertThat(webhookEventRepository.existsById("evt_noamount_1")).isFalse();
+    assertThat(outboxEventRepository.count()).isEqualTo(outboxBefore);
   }
 
   // ---- Helper: compute HMAC-SHA256 ----
