@@ -1,6 +1,7 @@
-# Wave 1 — databases (database-per-service) + User and Product app services.
-# One Postgres container per service DB on a shared Docker network.
-# Do NOT add Kong/Consul/RabbitMQ here — those arrive in later waves.
+# Wave 3 — add RabbitMQ broker + Payment + Notification services.
+# Topology (exchanges/queues/DLQs) is declared idempotently by each service at
+# startup (Spring AMQP / aio-pika). No pre-loaded definitions file — RabbitMQ
+# boots with RABBITMQ_DEFAULT_USER/PASS and the services handle the rest.
 
 name: ecommerce
 
@@ -258,21 +259,15 @@ services:
   # --- Wave 3: RabbitMQ broker + Payment + Notification ---
 
   rabbitmq:
-    # Topology approach: exchanges/queues/DLQs are pre-declared via definitions.json
-    # (loaded by the management plugin at startup). Services also declare the same
-    # resources idempotently — safe overlap with no conflict.
     image: rabbitmq:3-management-alpine
     container_name: ecommerce-rabbitmq
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
-      # Always use the default vhost "/" — definitions.json is pinned to it.
-      RABBITMQ_DEFAULT_VHOST: /
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
-      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
-      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     ports:
       - "5672:5672"
       - "15672:15672"
