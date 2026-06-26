@@ -78,6 +78,12 @@ public class PaymentService {
   /**
    * Initiate payment for an order. All charges are at-least-once safe via the Idempotency-Key. The
    * amount is always read server-side from Order Service; no client-supplied amount is used.
+   *
+   * <p>On a transient gateway error the PENDING reservation is intentionally kept: deleting it
+   * would let a same-key retry bypass the idempotency check and risk a double-charge on an
+   * ambiguous error (timeout where the charge may have succeeded). The caller receives 502; a
+   * same-key retry returns the existing PENDING payment. Reconciliation (wave 4) resolves the
+   * ambiguous row.
    */
   public CreateResult createPayment(
       CurrentUser caller, String idempotencyKey, CreatePaymentRequest request) {
@@ -90,6 +96,13 @@ public class PaymentService {
 
     // (2) Load the order via Order Service, forwarding the caller's JWT for ownership check.
     OrderView order = orderClient.getOrder(request.getOrderId(), caller.bearerToken());
+
+    // (2a) Belt-and-suspenders ownership check: Order Service already returns 404 for orders the
+    // caller doesn't own, but if user data ever differs across services we catch it here and return
+    // 404 (no existence leak) rather than charging the wrong user.
+    if (!order.userId().equals(caller.userId())) {
+      throw new ApiException(HttpStatus.NOT_FOUND, "ORDER_NOT_FOUND", "Order not found");
+    }
 
     // (3) Currency guard: if the client supplied a currency it must match the order.
     if (request.getCurrency() != null
@@ -138,8 +151,11 @@ public class PaymentService {
     GatewayChargeResult result = gatewayClient.charge(chargeReq);
 
     if (result.gatewayError()) {
-      // Transient gateway error: release the reservation so the order and key can be retried.
-      persistence.releaseReservation(reserved.getId());
+      // Leave the PENDING row in place: on an ambiguous error (e.g. timeout where the charge may
+      // have succeeded) deleting it would allow a same-key retry to bypass the idempotency check
+      // and potentially double-charge. The PENDING row holds the idempotency_key and the
+      // active-payment unique index. A same-key retry hits the fast-path at step (1) and returns
+      // this PENDING payment; a reconciliation sweep (wave 4) resolves it to SUCCEEDED/FAILED.
       throw new ApiException(
           HttpStatus.BAD_GATEWAY,
           "PAYMENT_GATEWAY_ERROR",
