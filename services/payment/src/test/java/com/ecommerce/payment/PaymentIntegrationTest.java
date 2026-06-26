@@ -3,6 +3,8 @@ package com.ecommerce.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -131,38 +133,99 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     assertThat(payload).contains("\"occurredAt\"");
   }
 
-  // ---- Declined token → 402 PAYMENT_DECLINED, persisted FAILED, PaymentFailed event ----
+  // ---- Declined token → 402 error envelope with payment_id + failure_reason, FAILED persisted
+  // ----
 
   @Test
-  void createPayment_declineToken_returns402_persistedFailed_paymentFailedEvent() throws Exception {
+  void createPayment_declineToken_returns402_errorEnvelope_persistedFailed_paymentFailedEvent()
+      throws Exception {
     UUID orderId = UUID.randomUUID();
     when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
 
-    mockMvc
-        .perform(
-            post("/api/v1/payments")
-                .header("Authorization", USER)
-                .header("Idempotency-Key", "key-decline")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    """
-                    {"order_id":"%s","payment_method_token":"pm_decline_this"}
-                    """
-                        .formatted(orderId)))
-        .andExpect(status().isPaymentRequired())
-        .andExpect(jsonPath("$.status").value("FAILED"))
-        .andExpect(
-            jsonPath("$.error").doesNotExist()); // body is payment object, not error envelope
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-decline")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_decline_this"}
+                        """
+                            .formatted(orderId)))
+            .andExpect(status().isPaymentRequired())
+            // Standard error envelope, not a payment object.
+            .andExpect(jsonPath("$.error").value("PAYMENT_DECLINED"))
+            .andExpect(jsonPath("$.failure_reason").value("CARD_DECLINED"))
+            .andExpect(jsonPath("$.payment_id").exists())
+            .andExpect(jsonPath("$.status").doesNotExist())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    // payment_id in the envelope points to the persisted FAILED payment.
+    String paymentId = com.jayway.jsonpath.JsonPath.read(body, "$.payment_id");
 
     List<Payment> payments = paymentRepository.findAll();
     assertThat(payments).hasSize(1);
     assertThat(payments.get(0).getStatus()).isEqualTo(PaymentStatus.FAILED);
     assertThat(payments.get(0).getFailureReason()).isEqualTo("CARD_DECLINED");
+    assertThat(payments.get(0).getId().toString()).isEqualTo(paymentId);
 
     List<OutboxEvent> events = outboxEventRepository.findAll();
     assertThat(events).hasSize(1);
     assertThat(events.get(0).getEventType()).isEqualTo("PaymentFailed");
     assertThat(events.get(0).getPayload()).contains("\"failureReason\"");
+  }
+
+  @Test
+  void createPayment_replayedDecline_returns402_sameErrorEnvelope() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    // First request: declined.
+    String first =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-decline-replay")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_decline_replay"}
+                        """
+                            .formatted(orderId)))
+            .andExpect(status().isPaymentRequired())
+            .andExpect(jsonPath("$.error").value("PAYMENT_DECLINED"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String firstPaymentId = com.jayway.jsonpath.JsonPath.read(first, "$.payment_id");
+
+    // Replayed: same 402 with the same payment_id.
+    String second =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-decline-replay")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_decline_replay"}
+                        """
+                            .formatted(orderId)))
+            .andExpect(status().isPaymentRequired())
+            .andExpect(jsonPath("$.error").value("PAYMENT_DECLINED"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String secondPaymentId = com.jayway.jsonpath.JsonPath.read(second, "$.payment_id");
+
+    assertThat(secondPaymentId).isEqualTo(firstPaymentId);
+    assertThat(paymentRepository.findAll()).hasSize(1); // no double-persist
   }
 
   // ---- Idempotency: replayed key returns same result, never charges twice ----
@@ -488,6 +551,34 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
         .andExpect(jsonPath("$.id").value(paymentId));
   }
 
+  // ---- Ownership: order belonging to another user → 404 (no existence leak) ----
+
+  @Test
+  void createPayment_orderBelongsToAnotherUser_returns404_noExistenceLeak() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    // Order Service returns the order for user 7 (USER_ID), but the request comes from user 99.
+    // OrderClient is mocked so we can test the local ownership guard independently of Order
+    // Service.
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", OTHER_USER) // user 99, not the order owner (7)
+                .header("Idempotency-Key", "key-cross-user")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_ok"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.error").value("ORDER_NOT_FOUND"));
+
+    // No payment row created.
+    assertThat(paymentRepository.findAll()).isEmpty();
+  }
+
   // ---- Currency mismatch ----
 
   @Test
@@ -543,10 +634,11 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     assertThat(outboxEventRepository.count()).isZero();
   }
 
-  // ---- Gateway error: reservation released, order/key free to retry ----
+  // ---- Gateway error: PENDING reservation kept, same-key retry returns it without re-charging
+  // ----
 
   @Test
-  void createPayment_gatewayError_returns502_releasesReservation() throws Exception {
+  void createPayment_gatewayError_returns502_keepsPendingReservation() throws Exception {
     UUID orderId = UUID.randomUUID();
     when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
 
@@ -564,9 +656,55 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.error").value("PAYMENT_GATEWAY_ERROR"));
 
-    // No terminal state persisted and the reservation was released (key can be retried).
-    assertThat(paymentRepository.findAll()).isEmpty();
+    // The PENDING row MUST remain: deleting it on an ambiguous error would allow a same-key
+    // retry to bypass the idempotency fast-path and potentially double-charge.
+    List<Payment> payments = paymentRepository.findAll();
+    assertThat(payments).hasSize(1);
+    assertThat(payments.get(0).getStatus()).isEqualTo(PaymentStatus.PENDING);
     assertThat(outboxEventRepository.count()).isZero();
+  }
+
+  @Test
+  void createPayment_gatewayError_sameKeyRetry_returnsPendingWithoutReCharging() throws Exception {
+    UUID orderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderId));
+
+    // First request: gateway error.
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-gw-retry")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_error_token"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isBadGateway());
+
+    // Same-key retry: hits the idempotency fast-path, returns the PENDING payment (200 OK),
+    // and MUST NOT call orderClient or the gateway a second time.
+    mockMvc
+        .perform(
+            post("/api/v1/payments")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-gw-retry")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"order_id":"%s","payment_method_token":"pm_error_token"}
+                    """
+                        .formatted(orderId)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.status").value("PENDING"));
+
+    // orderClient was called exactly once (the first attempt only); the retry short-circuited.
+    verify(orderClient, times(1)).getOrder(any(), any());
+
+    // Exactly one PENDING row; the gateway was never hit a second time.
+    assertThat(paymentRepository.findAll()).hasSize(1);
+    assertThat(paymentRepository.findAll().get(0).getStatus()).isEqualTo(PaymentStatus.PENDING);
   }
 
   // ---- M-2: a second in-flight charge on the same order is blocked before the gateway ----

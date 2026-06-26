@@ -35,15 +35,16 @@ public class OrderClient {
    * the caller owns it (404 otherwise — Order enforces ownership).
    *
    * @param orderId order UUID
-   * @param bearerToken {@code Authorization: Bearer <jwt>} value from the caller
+   * @param rawToken the raw JWT string (no {@code Bearer } prefix) from {@link
+   *     com.ecommerce.payment.security.CurrentUser#bearerToken()}
    * @return order view, never null
    * @throws ApiException 404 ORDER_NOT_FOUND when the order is missing or not the caller's
    */
-  public OrderView getOrder(UUID orderId, String bearerToken) {
+  public OrderView getOrder(UUID orderId, String rawToken) {
     return restClient
         .get()
         .uri("/api/v1/orders/{id}", orderId)
-        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+        .header(HttpHeaders.AUTHORIZATION, "Bearer " + rawToken)
         .retrieve()
         .onStatus(
             status -> status == HttpStatusCode.valueOf(404),

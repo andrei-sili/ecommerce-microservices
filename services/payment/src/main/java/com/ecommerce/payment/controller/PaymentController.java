@@ -1,11 +1,13 @@
 package com.ecommerce.payment.controller;
 
 import com.ecommerce.payment.dto.CreatePaymentRequest;
+import com.ecommerce.payment.dto.PaymentDeclinedResponse;
 import com.ecommerce.payment.dto.PaymentResponse;
 import com.ecommerce.payment.exception.ApiException;
 import com.ecommerce.payment.security.CurrentUser;
 import com.ecommerce.payment.service.PaymentService;
 import com.ecommerce.payment.service.PaymentService.CreateResult;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -31,25 +33,31 @@ public class PaymentController {
   /**
    * Initiate payment for an order. The {@code Idempotency-Key} header is required: a replayed key
    * returns the original outcome verbatim (same HTTP status + body), never charging twice.
+   *
+   * <p>A declined charge returns 402 with the standard error envelope extended with {@code
+   * payment_id} and {@code failure_reason}. The FAILED payment is persisted and queryable via GET.
    */
   @PostMapping
-  public ResponseEntity<PaymentResponse> createPayment(
+  public ResponseEntity<?> createPayment(
       CurrentUser caller,
       @RequestHeader("Idempotency-Key") String idempotencyKey,
-      @Valid @RequestBody CreatePaymentRequest request) {
+      @Valid @RequestBody CreatePaymentRequest request,
+      HttpServletRequest httpRequest) {
 
     CreateResult result = paymentService.createPayment(caller, idempotencyKey, request);
 
-    // A declined payment is persisted FAILED and returned 402 (predictable business outcome).
-    if (!result.replayed() && "FAILED".equals(result.response().getStatus())) {
-      return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED).body(result.response());
+    // Declined (new or replayed): standard error envelope with payment_id + failure_reason.
+    if ("FAILED".equals(result.response().getStatus())) {
+      return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+          .body(
+              PaymentDeclinedResponse.of(
+                  httpRequest.getRequestURI(),
+                  result.response().getId(),
+                  result.response().getFailureReason()));
     }
 
-    // Replayed key: return the original outcome (could be 201-originally or 402-originally).
+    // Replayed non-declined key: return the original successful outcome.
     if (result.replayed()) {
-      if ("FAILED".equals(result.response().getStatus())) {
-        return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED).body(result.response());
-      }
       return ResponseEntity.ok(result.response());
     }
 
