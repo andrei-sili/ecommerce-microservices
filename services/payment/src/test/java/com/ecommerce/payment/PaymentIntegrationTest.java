@@ -278,6 +278,62 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
     assertThat(outboxEventRepository.findAll()).hasSize(1); // no double-event
   }
 
+  // ---- IDOR: cross-user replay of an idempotency key returns 404, never A's data ----
+
+  @Test
+  void createPayment_crossUserReplayKey_returns404_noLeakOfOtherUserData() throws Exception {
+    UUID orderIdA = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any())).thenReturn(pendingOrder(orderIdA));
+
+    // User A creates a successful payment with key K.
+    String responseA =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-idor-replay")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_valid"}
+                        """
+                            .formatted(orderIdA)))
+            .andExpect(status().isCreated())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    String userAPaymentId = com.jayway.jsonpath.JsonPath.read(responseA, "$.id");
+
+    // User B replays the same key K → 404, A's data must not appear in the response.
+    String errorBody =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", OTHER_USER) // user 99, not the owner
+                    .header("Idempotency-Key", "key-idor-replay")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_ok"}
+                        """
+                            .formatted(UUID.randomUUID())))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.error").value("PAYMENT_NOT_FOUND"))
+            .andExpect(jsonPath("$.payment_id").doesNotExist())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    // A's payment_id and user_id must not leak into B's error response.
+    assertThat(errorBody).doesNotContain(userAPaymentId);
+    assertThat(errorBody).doesNotContain("\"user_id\"");
+    // orderClient called once only (for A's creation); short-circuited before orderClient for B.
+    verify(orderClient, times(1)).getOrder(any(), any());
+    // No second payment row created.
+    assertThat(paymentRepository.findAll()).hasSize(1);
+  }
+
   // ---- Missing Idempotency-Key → 400 ----
 
   @Test
