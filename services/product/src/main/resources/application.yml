@@ -29,6 +29,13 @@ security:
   # Shared key for system-to-system calls to the internal reservation endpoints (Order -> Product).
   internal-api-key: ${INTERNAL_API_KEY}
 
+reservation:
+  # How long a RESERVED hold is valid before the sweeper releases it.
+  ttl-minutes: ${RESERVATION_TTL_MINUTES:30}
+  sweeper:
+    # Fixed delay (and initial delay) between sweeper runs in milliseconds.
+    delay-ms: ${RESERVATION_SWEEPER_DELAY_MS:60000}
+
 management:
   endpoints:
     web:
