@@ -8,7 +8,6 @@ import java.util.Date;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
@@ -45,17 +44,26 @@ public class OutboxRelay {
     for (OutboxEvent event : batch) {
       String routingKey = routingKeyFor(event.getEventType());
       if (routingKey == null) {
-        log.warn("No routing key for event type '{}' (id={}), skipping", event.getEventType(), event.getId());
+        log.warn(
+            "No routing key for event type '{}' (id={}), skipping",
+            event.getEventType(),
+            event.getId());
         continue;
       }
       try {
         Message amqpMessage = buildAmqpMessage(event);
         rabbitTemplate.convertAndSend(EXCHANGE, routingKey, amqpMessage);
         event.setPublishedAt(Instant.now());
-        log.debug("Relayed outbox event id={} type={} routingKey={}", event.getId(), event.getEventType(), routingKey);
-      } catch (AmqpException | RuntimeException e) {
+        log.debug(
+            "Relayed outbox event id={} type={} routingKey={}",
+            event.getId(),
+            event.getEventType(),
+            routingKey);
+      } catch (RuntimeException e) { // includes AmqpException (subclass)
         log.error(
-            "Failed to publish outbox event id={}: {}, stopping batch", event.getId(), e.getMessage());
+            "Failed to publish outbox event id={}: {}, stopping batch",
+            event.getId(),
+            e.getMessage());
         // Break so the transaction commits for events already published in this batch.
         // The failed event stays unpublished and will be retried on the next run.
         break;

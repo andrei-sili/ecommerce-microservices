@@ -18,9 +18,10 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consumes payment events from {@code order.payment-events} with manual ack. The message is acked
- * only after the side-effect transaction commits (via {@link PaymentEventHandlerService}). Permanent
- * failures (amount mismatch, anomalous state) are nacked without requeue → DLQ. Transient failures
- * (upstream 5xx) are nacked with requeue on the first attempt, then dead-lettered on retry.
+ * only after the side-effect transaction commits (via {@link PaymentEventHandlerService}).
+ * Permanent failures (amount mismatch, anomalous state) are nacked without requeue → DLQ. Transient
+ * failures (upstream 5xx) are nacked with requeue on the first attempt, then dead-lettered on
+ * retry.
  *
  * <p>Event payloads are camelCase (see contract). Deserialization uses a dedicated {@link
  * JsonMapper} configured independently of the REST snake_case {@code ObjectMapper}.
@@ -146,8 +147,7 @@ public class PaymentEventConsumer {
     try {
       reservationClient.release(orderId);
     } catch (UpstreamServiceException e) {
-      log.warn(
-          "Failed to release reservation for CANCELLED order {}: {}", orderId, e.getMessage());
+      log.warn("Failed to release reservation for CANCELLED order {}: {}", orderId, e.getMessage());
     }
     channel.basicAck(tag, false);
   }
