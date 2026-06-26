@@ -64,8 +64,7 @@ public class CartService {
     CartItem item =
         cart.findItem(productId)
             .orElseThrow(
-                () ->
-                    new NotFoundException("CART_ITEM_NOT_FOUND", "Item is not in the cart"));
+                () -> new NotFoundException("CART_ITEM_NOT_FOUND", "Item is not in the cart"));
 
     ProductSnapshot snapshot = productClient.fetchAvailableProduct(productId, bearerToken);
     item.setQuantity(quantity);
@@ -111,8 +110,7 @@ public class CartService {
       // A concurrent request created the cart first (user_id is UNIQUE); reuse it.
       return cartRepository
           .findByUserId(userId)
-          .orElseThrow(
-              () -> new NotFoundException("CART_NOT_FOUND", "Cart could not be resolved"));
+          .orElseThrow(() -> new NotFoundException("CART_NOT_FOUND", "Cart could not be resolved"));
     }
   }
 

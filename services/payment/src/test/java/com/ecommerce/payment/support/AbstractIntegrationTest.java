@@ -1,12 +1,10 @@
 package com.ecommerce.payment.support;
 
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
@@ -25,19 +23,9 @@ public abstract class AbstractIntegrationTest {
           .withPassword("payment");
 
   @BeforeAll
-  static void ensureDocker() {
-    Assumptions.assumeTrue(
-        isDockerAvailable(), "Docker is not available/compatible — skipping integration tests");
+  static void startContainer() {
     if (!POSTGRES.isRunning()) {
       POSTGRES.start();
-    }
-  }
-
-  private static boolean isDockerAvailable() {
-    try {
-      return DockerClientFactory.instance().isDockerAvailable();
-    } catch (Throwable t) {
-      return false;
     }
   }
 

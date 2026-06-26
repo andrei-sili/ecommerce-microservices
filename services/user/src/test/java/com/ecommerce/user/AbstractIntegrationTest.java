@@ -1,6 +1,5 @@
 package com.ecommerce.user;
 
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -15,9 +14,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * (env or system property), it uses that already-running database instead.
  *
  * <p>If neither an external DB is configured nor a usable Docker environment is available, the
- * integration tests are <strong>skipped</strong> (JUnit assumption) rather than failing the build,
- * so the unit tests still gate {@code mvn test}. CI must run with a working Docker daemon (or an
- * external DB) so these tests actually execute.
+ * integration tests <strong>fail loudly</strong> (they never self-skip), so a misconfigured Docker
+ * cannot masquerade as a green {@code "Tests run: 0"}. CI must run with a working Docker daemon (or
+ * an external DB) so these tests actually execute.
  */
 @SpringBootTest
 public abstract class AbstractIntegrationTest {
@@ -61,8 +60,8 @@ public abstract class AbstractIntegrationTest {
       registry.add("spring.datasource.username", POSTGRES::getUsername);
       registry.add("spring.datasource.password", POSTGRES::getPassword);
     } else {
-      // No DB available: provide placeholders so context init is not attempted before the
-      // assumption below short-circuits the tests.
+      // No DB available: provide placeholders so static wiring does not NPE. requireDatabase()
+      // fails the run loudly in @BeforeAll before any test executes.
       registry.add("spring.datasource.url", () -> "jdbc:postgresql://localhost:1/none");
       registry.add("spring.datasource.username", () -> "none");
       registry.add("spring.datasource.password", () -> "none");
@@ -71,12 +70,12 @@ public abstract class AbstractIntegrationTest {
 
   @BeforeAll
   static void requireDatabase() {
-    Assumptions.assumeTrue(
-        USE_EXTERNAL || POSTGRES != null,
-        () ->
-            "Skipping integration tests: no usable Docker environment for Testcontainers and no "
-                + "EXTERNAL_DB_URL provided"
-                + (CONTAINER_FAILURE != null ? " (" + CONTAINER_FAILURE.getMessage() + ")" : ""));
+    if (!USE_EXTERNAL && POSTGRES == null) {
+      throw new IllegalStateException(
+          "Integration tests require a database but none is available: Testcontainers could not "
+              + "start a Docker container and no EXTERNAL_DB_URL was provided",
+          CONTAINER_FAILURE);
+    }
   }
 
   private static String resolve(String key) {

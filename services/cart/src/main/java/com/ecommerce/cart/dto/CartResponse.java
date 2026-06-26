@@ -15,12 +15,9 @@ public record CartResponse(
     Instant updatedAt) {
 
   public static CartResponse from(Cart cart) {
-    List<CartItemResponse> items =
-        cart.getItems().stream().map(CartItemResponse::from).toList();
+    List<CartItemResponse> items = cart.getItems().stream().map(CartItemResponse::from).toList();
     BigDecimal subtotal =
-        cart.getItems().stream()
-            .map(CartItem::lineTotal)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        cart.getItems().stream().map(CartItem::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
     int totalItems = cart.getItems().stream().mapToInt(CartItem::getQuantity).sum();
     return new CartResponse(
         cart.getUserId(),

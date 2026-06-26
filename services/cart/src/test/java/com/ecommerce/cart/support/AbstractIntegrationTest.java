@@ -1,21 +1,19 @@
 package com.ecommerce.cart.support;
 
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 /**
  * Base for full-stack integration tests against a real PostgreSQL: Flyway runs the real migrations,
  * Hibernate validates the entities, and HTTP flows are exercised through {@code MockMvc}.
  *
- * <p>The container is started manually (not via the {@code @Testcontainers} extension) so the
- * Docker-availability assumption can run first and skip the class cleanly on environments without a
- * compatible Docker daemon, instead of failing the build.
+ * <p>The container is started manually in {@code @BeforeAll}. If Docker is unavailable or
+ * incompatible, {@code start()} fails loudly and the suite goes red — the integration tests never
+ * self-skip, so a misconfigured Docker cannot masquerade as a green {@code "Tests run: 0"}.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -28,19 +26,9 @@ public abstract class AbstractIntegrationTest {
           .withPassword("cart");
 
   @BeforeAll
-  static void ensureDocker() {
-    Assumptions.assumeTrue(
-        isDockerAvailable(), "Docker is not available/compatible — skipping integration tests");
+  static void startContainer() {
     if (!POSTGRES.isRunning()) {
       POSTGRES.start();
-    }
-  }
-
-  private static boolean isDockerAvailable() {
-    try {
-      return DockerClientFactory.instance().isDockerAvailable();
-    } catch (Throwable t) {
-      return false;
     }
   }
 
