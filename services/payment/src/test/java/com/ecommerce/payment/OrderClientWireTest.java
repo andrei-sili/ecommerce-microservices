@@ -22,9 +22,9 @@ import org.springframework.test.web.client.MockRestServiceServer;
 /**
  * Wire test: verifies the auto-configured RestClient.Builder (Boot's bean, SNAKE_CASE ObjectMapper)
  * is used by OrderClient. @RestClientTest wires Boot's Jackson auto-config (including
- * property-naming-strategy: SNAKE_CASE from test application.yml) and a MockRestServiceServer
- * bound to the RestClient.Builder. If someone accidentally replaced the Boot builder with the
- * static RestClient.builder(), snake_case fields like order_id → orderId would break (the
+ * property-naming-strategy: SNAKE_CASE from test application.yml) and a MockRestServiceServer bound
+ * to the RestClient.Builder. If someone accidentally replaced the Boot builder with the static
+ * RestClient.builder(), snake_case fields like order_id → orderId would break (the
  * restclient-snakecase-gotcha produced a 400 in Wave 2 for exactly this reason).
  */
 @RestClientTest(OrderClient.class)

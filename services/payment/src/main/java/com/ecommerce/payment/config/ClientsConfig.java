@@ -12,8 +12,8 @@ import org.springframework.core.annotation.Order;
 
 /**
  * Shared client infrastructure. {@link com.ecommerce.payment.client.OrderClient} is a
- * {@code @Component} that takes the auto-configured {@code RestClient.Builder} bean directly —
- * this config only adds the shared timeout customiser.
+ * {@code @Component} that takes the auto-configured {@code RestClient.Builder} bean directly — this
+ * config only adds the shared timeout customiser.
  */
 @Configuration
 @EnableConfigurationProperties(ClientsProperties.class)

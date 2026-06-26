@@ -2,10 +2,7 @@ package com.ecommerce.payment.gateway;
 
 /** Outcome of a gateway charge attempt. */
 public record GatewayChargeResult(
-    boolean approved,
-    boolean gatewayError,
-    String gatewayPaymentId,
-    String failureReason) {
+    boolean approved, boolean gatewayError, String gatewayPaymentId, String failureReason) {
 
   public static GatewayChargeResult approved(String gatewayPaymentId) {
     return new GatewayChargeResult(true, false, gatewayPaymentId, null);

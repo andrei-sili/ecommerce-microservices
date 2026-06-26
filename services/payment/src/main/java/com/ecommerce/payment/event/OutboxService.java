@@ -75,11 +75,7 @@ public class OutboxService {
   private void save(Payment payment, String eventType, Object payload, Instant occurredAt) {
     repository.save(
         new OutboxEvent(
-            AGGREGATE_TYPE,
-            payment.getId().toString(),
-            eventType,
-            serialize(payload),
-            occurredAt));
+            AGGREGATE_TYPE, payment.getId().toString(), eventType, serialize(payload), occurredAt));
   }
 
   private String serialize(Object payload) {

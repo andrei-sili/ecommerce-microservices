@@ -3,7 +3,6 @@ package com.ecommerce.payment.relay;
 import com.ecommerce.payment.model.OutboxEvent;
 import com.ecommerce.payment.repository.OutboxEventRepository;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -18,8 +17,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Drains unpublished outbox events to RabbitMQ with publisher confirms. At-least-once delivery:
- * a crash between publish and mark-published will re-publish on the next run; consumers dedup via
+ * Drains unpublished outbox events to RabbitMQ with publisher confirms. At-least-once delivery: a
+ * crash between publish and mark-published will re-publish on the next run; consumers dedup via
  * their inbox tables.
  *
  * <p>Uses {@code FOR UPDATE SKIP LOCKED} so multiple instances never process the same row.
@@ -64,7 +63,8 @@ public class OutboxRelay {
       rabbitTemplate.invoke(
           ops -> {
             for (OutboxEvent event : batch) {
-              String routingKey = ROUTING_KEYS.getOrDefault(event.getEventType(), event.getEventType());
+              String routingKey =
+                  ROUTING_KEYS.getOrDefault(event.getEventType(), event.getEventType());
               MessageProperties props = new MessageProperties();
               props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
               props.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
@@ -73,9 +73,7 @@ public class OutboxRelay {
               props.setTimestamp(Date.from(event.getOccurredAt()));
               byte[] body = event.getPayload().getBytes(StandardCharsets.UTF_8);
               ops.send(
-                  EXCHANGE,
-                  routingKey,
-                  new org.springframework.amqp.core.Message(body, props));
+                  EXCHANGE, routingKey, new org.springframework.amqp.core.Message(body, props));
             }
             ops.waitForConfirmsOrDie(confirmTimeoutMs);
             return null;

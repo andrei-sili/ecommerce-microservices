@@ -73,8 +73,7 @@ public class PaymentController {
       @RequestBody byte[] rawBody) {
 
     if (rawBody == null || rawBody.length == 0) {
-      throw new ApiException(
-          HttpStatus.BAD_REQUEST, "MALFORMED_WEBHOOK", "Empty webhook body");
+      throw new ApiException(HttpStatus.BAD_REQUEST, "MALFORMED_WEBHOOK", "Empty webhook body");
     }
     paymentService.processWebhook(rawBody, signature);
     return ResponseEntity.ok().build();

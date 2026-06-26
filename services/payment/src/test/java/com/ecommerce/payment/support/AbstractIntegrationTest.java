@@ -46,9 +46,7 @@ public abstract class AbstractIntegrationTest {
     registry.add(
         "spring.datasource.url",
         () ->
-            POSTGRES.isRunning()
-                ? POSTGRES.getJdbcUrl()
-                : "jdbc:postgresql://unused:5432/unused");
+            POSTGRES.isRunning() ? POSTGRES.getJdbcUrl() : "jdbc:postgresql://unused:5432/unused");
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);

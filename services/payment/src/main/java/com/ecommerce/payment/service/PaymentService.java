@@ -84,8 +84,8 @@ public class PaymentService {
   public record CreateResult(PaymentResponse response, boolean replayed) {}
 
   /**
-   * Initiate payment for an order. All charges are at-least-once safe via the Idempotency-Key.
-   * The amount is always read server-side from Order Service; no client-supplied amount is used.
+   * Initiate payment for an order. All charges are at-least-once safe via the Idempotency-Key. The
+   * amount is always read server-side from Order Service; no client-supplied amount is used.
    */
   public CreateResult createPayment(
       CurrentUser caller, String idempotencyKey, CreatePaymentRequest request) {
@@ -119,16 +119,15 @@ public class PaymentService {
     // (6) Charge the gateway (no DB transaction open during this remote call).
     GatewayChargeRequest chargeReq =
         new GatewayChargeRequest(
-            UUID.randomUUID(),
-            request.getPaymentMethodToken(),
-            amountMinorUnits,
-            order.currency());
+            UUID.randomUUID(), request.getPaymentMethodToken(), amountMinorUnits, order.currency());
     GatewayChargeResult result = gatewayClient.charge(chargeReq);
 
     if (result.gatewayError()) {
       // Transient gateway error: no terminal state persisted; idempotency key allows safe retry.
       throw new ApiException(
-          HttpStatus.BAD_GATEWAY, "PAYMENT_GATEWAY_ERROR", "Payment gateway is temporarily unavailable");
+          HttpStatus.BAD_GATEWAY,
+          "PAYMENT_GATEWAY_ERROR",
+          "Payment gateway is temporarily unavailable");
     }
 
     // (7) Persist payment + transaction + outbox event in one atomic transaction.
@@ -159,7 +158,13 @@ public class PaymentService {
     PaymentStatus status = result.approved() ? PaymentStatus.SUCCEEDED : PaymentStatus.FAILED;
     Payment payment =
         new Payment(
-            orderId, userId, amount, currency, status, GATEWAY_NAME, paymentMethodToken,
+            orderId,
+            userId,
+            amount,
+            currency,
+            status,
+            GATEWAY_NAME,
+            paymentMethodToken,
             idempotencyKey);
     if (result.gatewayPaymentId() != null) {
       payment.setGatewayPaymentId(result.gatewayPaymentId());
@@ -179,7 +184,9 @@ public class PaymentService {
             amount,
             currency,
             result.gatewayPaymentId(),
-            result.approved() ? "Payment captured" : "Payment declined: " + result.failureReason()));
+            result.approved()
+                ? "Payment captured"
+                : "Payment declined: " + result.failureReason()));
 
     // Outbox event in the same transaction.
     Instant occurredAt = Instant.now();
@@ -210,9 +217,7 @@ public class PaymentService {
               .orElseThrow(
                   () ->
                       new ApiException(
-                          HttpStatus.NOT_FOUND,
-                          "PAYMENT_NOT_FOUND",
-                          "Payment not found"));
+                          HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "Payment not found"));
     }
     return PaymentResponse.from(payment);
   }
@@ -265,8 +270,7 @@ public class PaymentService {
           event.getEventId(),
           event.getGatewayPaymentId());
       // Record so we don't re-process; associate with a zero UUID since we have no payment id.
-      webhookEventRepository.save(
-          new ProcessedWebhookEvent(event.getEventId(), new UUID(0, 0)));
+      webhookEventRepository.save(new ProcessedWebhookEvent(event.getEventId(), new UUID(0, 0)));
       return;
     }
 
@@ -379,15 +383,11 @@ public class PaymentService {
     }
     if ("CANCELLED".equals(status) || "PAYMENT_FAILED".equals(status)) {
       throw new ApiException(
-          HttpStatus.UNPROCESSABLE_ENTITY,
-          "ORDER_NOT_PAYABLE",
-          "Order is not in a payable state");
+          HttpStatus.UNPROCESSABLE_ENTITY, "ORDER_NOT_PAYABLE", "Order is not in a payable state");
     }
     if (!"PENDING".equals(status) && !"PAID".equals(status)) {
       throw new ApiException(
-          HttpStatus.UNPROCESSABLE_ENTITY,
-          "ORDER_NOT_PAYABLE",
-          "Order is not in a payable state");
+          HttpStatus.UNPROCESSABLE_ENTITY, "ORDER_NOT_PAYABLE", "Order is not in a payable state");
     }
     // Extra DB check: if a SUCCEEDED payment already exists for this order (regardless of order
     // status), reject to prevent any double-charge path.
@@ -401,9 +401,7 @@ public class PaymentService {
   private void verifyWebhookSignature(byte[] rawBody, String signature) {
     if (signature == null || signature.isBlank()) {
       throw new ApiException(
-          HttpStatus.UNAUTHORIZED,
-          "INVALID_WEBHOOK_SIGNATURE",
-          "Missing webhook signature");
+          HttpStatus.UNAUTHORIZED, "INVALID_WEBHOOK_SIGNATURE", "Missing webhook signature");
     }
     try {
       Mac mac = Mac.getInstance("HmacSHA256");
@@ -426,6 +424,9 @@ public class PaymentService {
 
   /** Convert a decimal amount to minor units (integer cents) for gateway charging. */
   private static long toMinorUnits(BigDecimal amount) {
-    return amount.setScale(2, RoundingMode.HALF_UP).multiply(BigDecimal.valueOf(100)).longValueExact();
+    return amount
+        .setScale(2, RoundingMode.HALF_UP)
+        .multiply(BigDecimal.valueOf(100))
+        .longValueExact();
   }
 }

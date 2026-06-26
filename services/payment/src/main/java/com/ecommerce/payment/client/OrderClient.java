@@ -1,6 +1,7 @@
 package com.ecommerce.payment.client;
 
 import com.ecommerce.payment.exception.ApiException;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -8,11 +9,9 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-import java.util.UUID;
-
 /**
- * HTTP client for Order Service. MUST use the auto-configured {@code RestClient.Builder} bean —
- * NOT the static {@code RestClient.builder()} — so that Boot's SNAKE_CASE ObjectMapper is applied.
+ * HTTP client for Order Service. MUST use the auto-configured {@code RestClient.Builder} bean — NOT
+ * the static {@code RestClient.builder()} — so that Boot's SNAKE_CASE ObjectMapper is applied.
  * Using the static builder bypasses Boot's customisers and produces camelCase field names, which
  * broke Order in Wave 2 (restclient-snakecase-gotcha).
  */
@@ -26,15 +25,14 @@ public class OrderClient {
    * @param baseUrl from {@code clients.order.base-url}.
    */
   public OrderClient(
-      RestClient.Builder builder,
-      @Value("${clients.order.base-url}") String baseUrl) {
+      RestClient.Builder builder, @Value("${clients.order.base-url}") String baseUrl) {
     // clone() keeps all Boot customisers (ObjectMapper, timeouts) and adds our base URL.
     this.restClient = builder.clone().baseUrl(baseUrl).build();
   }
 
   /**
-   * Load the order from Order Service, forwarding the caller's JWT so the order is returned only
-   * if the caller owns it (404 otherwise — Order enforces ownership).
+   * Load the order from Order Service, forwarding the caller's JWT so the order is returned only if
+   * the caller owns it (404 otherwise — Order enforces ownership).
    *
    * @param orderId order UUID
    * @param bearerToken {@code Authorization: Bearer <jwt>} value from the caller
