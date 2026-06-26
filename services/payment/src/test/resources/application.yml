@@ -1,0 +1,46 @@
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  # RabbitMQ: use localhost during tests; OutboxRelay is @MockBean so no connection is opened.
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+server:
+  port: 0
+
+security:
+  jwt:
+    secret: test-secret-that-is-long-enough-for-hs256-1234567890
+  webhook:
+    secret: test-webhook-secret
+
+clients:
+  order:
+    base-url: http://order-service.test
+  connect-timeout-ms: 2000
+  read-timeout-ms: 5000
+
+payment:
+  gateway:
+    api-key: sandbox-test-key
+
+outbox:
+  relay:
+    batch-size: 10
+    confirm-timeout-ms: 5000
+    fixed-delay-ms: 60000
