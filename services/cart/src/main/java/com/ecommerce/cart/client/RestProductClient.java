@@ -25,8 +25,7 @@ public class RestProductClient implements ProductClient {
     if (product == null || !Boolean.TRUE.equals(product.available())) {
       // A null body or available==false means the product cannot be bought right now.
       if (product != null && Boolean.FALSE.equals(product.available())) {
-        throw new ConflictException(
-            "PRODUCT_UNAVAILABLE", "Product is not available for purchase");
+        throw new ConflictException("PRODUCT_UNAVAILABLE", "Product is not available for purchase");
       }
       throw new NotFoundException("PRODUCT_NOT_FOUND", "Product not found");
     }

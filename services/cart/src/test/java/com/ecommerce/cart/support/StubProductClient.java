@@ -37,7 +37,6 @@ public class StubProductClient implements ProductClient {
     if (!product.available()) {
       throw new ConflictException("PRODUCT_UNAVAILABLE", "Product is not available for purchase");
     }
-    return new ProductSnapshot(
-        productId, product.name(), product.unitPrice(), product.currency());
+    return new ProductSnapshot(productId, product.name(), product.unitPrice(), product.currency());
   }
 }

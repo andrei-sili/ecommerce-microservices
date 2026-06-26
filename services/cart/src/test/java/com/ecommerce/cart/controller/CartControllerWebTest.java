@@ -271,7 +271,8 @@ class CartControllerWebTest {
     verifyNoInteractions(cartService);
   }
 
-  // ---- Ownership: the user id passed to the service comes from the token `sub`, not the client ----
+  // ---- Ownership: the user id passed to the service comes from the token `sub`, not the client
+  // ----
 
   @Test
   void getCart_ownershipDerivedFromTokenSubject() throws Exception {
