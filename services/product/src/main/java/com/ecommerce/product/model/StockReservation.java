@@ -17,6 +17,9 @@ import org.hibernate.annotations.UpdateTimestamp;
  * One reserved line of an order's stock reservation. {@code products.reserved_quantity} is the
  * running sum of {@code RESERVED} rows; a {@code RELEASED} row no longer counts toward it. {@code
  * (order_id, product_id)} is unique so a replayed reservation is idempotent.
+ *
+ * <p>Wave 3 adds {@code expires_at}: the sweeper releases RESERVED rows past this instant, and
+ * commit rejects RELEASED/expired rows (409 RESERVATION_NOT_ACTIVE).
  */
 @Entity
 @Table(name = "stock_reservations")
@@ -39,6 +42,9 @@ public class StockReservation {
   @Column(nullable = false, length = 20)
   private ReservationStatus status;
 
+  @Column(name = "expires_at", nullable = false)
+  private Instant expiresAt;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
@@ -49,11 +55,13 @@ public class StockReservation {
 
   public StockReservation() {}
 
-  public StockReservation(UUID orderId, Long productId, int quantity, ReservationStatus status) {
+  public StockReservation(
+      UUID orderId, Long productId, int quantity, ReservationStatus status, Instant expiresAt) {
     this.orderId = orderId;
     this.productId = productId;
     this.quantity = quantity;
     this.status = status;
+    this.expiresAt = expiresAt;
   }
 
   public Long getId() {
@@ -78,6 +86,10 @@ public class StockReservation {
 
   public void setStatus(ReservationStatus status) {
     this.status = status;
+  }
+
+  public Instant getExpiresAt() {
+    return expiresAt;
   }
 
   public Instant getCreatedAt() {
