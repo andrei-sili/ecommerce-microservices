@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: payment-service
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:rabbitmq}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+
+server:
+  port: ${SERVER_PORT:8085}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET}
+  webhook:
+    secret: ${PAYMENT_WEBHOOK_SECRET}
+
+clients:
+  order:
+    base-url: ${ORDER_SERVICE_URL:http://order-service:8084}
+  connect-timeout-ms: ${CLIENTS_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${CLIENTS_READ_TIMEOUT_MS:5000}
+
+payment:
+  gateway:
+    api-key: ${PAYMENT_GATEWAY_API_KEY:sandbox-key}
+
+outbox:
+  relay:
+    batch-size: ${OUTBOX_RELAY_BATCH_SIZE:50}
+    confirm-timeout-ms: ${OUTBOX_RELAY_CONFIRM_TIMEOUT_MS:5000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
