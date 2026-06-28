@@ -68,6 +68,9 @@ jobs:
       - name: Black format check
         working-directory: services/notification
         run: black --check .
+      - name: Mypy type check
+        working-directory: services/notification
+        run: mypy app
       - name: Run tests
         working-directory: services/notification
         run: pytest
