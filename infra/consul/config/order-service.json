@@ -1,0 +1,16 @@
+{
+  "service": {
+    "name": "order-service",
+    "id": "order-service-1",
+    "address": "order-service",
+    "port": 8084,
+    "tags": ["http"],
+    "checks": [
+      {
+        "http": "http://order-service:8084/actuator/health",
+        "interval": "10s",
+        "timeout": "5s"
+      }
+    ]
+  }
+}

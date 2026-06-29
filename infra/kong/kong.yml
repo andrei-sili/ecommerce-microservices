@@ -1,0 +1,298 @@
+# Kong API Gateway — DB-less declarative config (Wave 4).
+#
+# Single edge: client -> Kong :8000 -> service. East-west service-to-service calls
+# bypass Kong by design (over ecommerce-net), so each service KEEPS validating JWT /
+# INTERNAL_API_KEY / webhook HMAC locally — Kong is an outer gate, never the sole gate.
+#
+# Auth posture = Option A: Kong is NOT given JWT_SECRET. It does routing + per-IP rate
+# limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
+# Services validate the JWT signature/expiry themselves (unchanged). NO secrets in this file.
+#
+# Routing resolves through Docker DNS, health-gated by Kong's OWN active health checks: each
+# service `host` points at a Kong `upstream` whose single target is the Docker service name +
+# app port (`<svc>:<port>`), always resolvable on ecommerce-net via Docker's embedded resolver
+# (127.0.0.11). Each upstream carries healthchecks.active (HTTP /actuator/health): Kong probes
+# every target itself and drops an unhealthy one from the balancer — zero peers means Kong
+# returns 503, never a 500 from a bare unresolved host (500 is reserved for unexpected errors;
+# see .claude/rules/api-design.md). Kong keeps re-probing, so a recovered target re-enters the
+# balancer automatically — recovery for ANY outage length, no Kong reload.
+#
+# Consul is the live service registry / health-catalog / UI, OUT of Kong's request path: exactly
+# one layer (Kong) owns load-balancing + routing health, as Kong's docs require. (Supersedes the
+# early-build Consul-DNS routing attempt, which couldn't both 503 cleanly while down AND recover
+# after a >1 min outage — see agent_docs/research/kong-consul.md.)
+#
+# Every route sets strip_path: false because services already serve under /api/v1
+# (Kong's default strip_path: true would forward "/" and 404 the backend).
+_format_version: "3.0"
+
+services:
+  - name: user-service
+    host: user-upstream
+    protocol: http
+    routes:
+      # More-specific path than /api/v1/auth, so Kong matches it first: ONLY login gets
+      # the strict brute-force cap; register and the rest fall under the global 120/min.
+      - name: auth-login
+        paths:
+          - /api/v1/auth/login
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 5
+              policy: local
+              limit_by: ip
+      - name: auth
+        paths:
+          - /api/v1/auth
+        methods:
+          - POST
+        strip_path: false
+      - name: users
+        paths:
+          - /api/v1/users
+        methods:
+          - GET
+          - PUT
+        strip_path: false
+
+  - name: product-service
+    host: product-upstream
+    protocol: http
+    routes:
+      # No route for /api/v1/inventory/* -> internal-only (isolation by omission -> 404).
+      - name: products
+        paths:
+          - /api/v1/products
+          - /api/v1/categories
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        strip_path: false
+
+  - name: cart-service
+    host: cart-upstream
+    protocol: http
+    routes:
+      - name: cart
+        paths:
+          - /api/v1/cart
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        strip_path: false
+
+  - name: order-service
+    host: order-upstream
+    protocol: http
+    routes:
+      - name: orders
+        paths:
+          - /api/v1/orders
+        methods:
+          - GET
+          - POST
+          - PATCH
+        strip_path: false
+
+  - name: payment-service
+    host: payment-upstream
+    protocol: http
+    routes:
+      # The webhook lives UNDER the public /api/v1/payments prefix, so a plain prefix
+      # route would proxy it. This higher-specificity route matches first and terminates
+      # at the edge (404) — the sandbox webhook has no external caller this wave.
+      # methods are listed explicitly: in Kong's traditional router a route WITH methods
+      # outranks a methods-less one regardless of path length, so without these the broader
+      # `payments` route (GET, POST) would win and proxy the webhook. With methods present
+      # the longer path decides and this route wins (same mechanism that lets auth-login
+      # outrank auth). The list covers every method so the webhook is blocked for all of them.
+      # The path is a Kong regex (~ prefix) matching the `webhook` segment in ANY casing, so
+      # /api/v1/payments/WEBHOOK can't slip past a lowercase match and get proxied to Payment;
+      # the create route /api/v1/payments is unaffected.
+      - name: payments-webhook-block
+        paths:
+          - ~/api/v1/payments/[Ww][Ee][Bb][Hh][Oo][Oo][Kk]$
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+          - HEAD
+        strip_path: false
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+      - name: payments
+        paths:
+          - /api/v1/payments
+        methods:
+          - GET
+          - POST
+        strip_path: false
+
+# Docker-DNS upstreams: one per routed service, single target = <svc>:<port> (resolvable on
+# ecommerce-net via Docker's embedded resolver). Each carries healthchecks.active so Kong owns
+# routing health: a down target leaves the balancer (zero peers → 503), a recovered one
+# re-enters automatically (no Kong reload). All five routed services are Spring → /actuator/health.
+# (notification-service has no public route, so it needs no upstream.)
+upstreams:
+  - name: user-upstream
+    targets:
+      - target: user-service:8081
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        healthy:
+          interval: 5
+          successes: 3
+          http_statuses:
+            - 200
+        unhealthy:
+          interval: 5
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+          http_statuses:
+            - 429
+            - 500
+            - 503
+  - name: product-upstream
+    targets:
+      - target: product-service:8082
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        healthy:
+          interval: 5
+          successes: 3
+          http_statuses:
+            - 200
+        unhealthy:
+          interval: 5
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+          http_statuses:
+            - 429
+            - 500
+            - 503
+  - name: cart-upstream
+    targets:
+      - target: cart-service:8083
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        healthy:
+          interval: 5
+          successes: 3
+          http_statuses:
+            - 200
+        unhealthy:
+          interval: 5
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+          http_statuses:
+            - 429
+            - 500
+            - 503
+  - name: order-upstream
+    targets:
+      - target: order-service:8084
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        healthy:
+          interval: 5
+          successes: 3
+          http_statuses:
+            - 200
+        unhealthy:
+          interval: 5
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+          http_statuses:
+            - 429
+            - 500
+            - 503
+  - name: payment-upstream
+    targets:
+      - target: payment-service:8085
+    healthchecks:
+      active:
+        type: http
+        http_path: /actuator/health
+        healthy:
+          interval: 5
+          successes: 3
+          http_statuses:
+            - 200
+        unhealthy:
+          interval: 5
+          http_failures: 3
+          tcp_failures: 3
+          timeouts: 3
+          http_statuses:
+            - 429
+            - 500
+            - 503
+
+# Global plugins (no service/route binding) — apply to every route unless a more
+# specific (route-scoped) plugin of the same name overrides them.
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 120
+      policy: local
+      limit_by: ip
+  - name: request-transformer
+    config:
+      remove:
+        headers:
+          - X-Consumer-ID
+          - X-Consumer-Custom-ID
+          - X-Consumer-Username
+          - X-Credential-Identifier
+          - X-Anonymous-Consumer
+          - X-User-Id
+          - X-User-Roles
+          - X-Authenticated-User
+  - name: cors
+    config:
+      # A CORS origin is NOT a secret. Set this per environment (one real frontend origin).
+      # Never '*' together with credentials: true (Kong won't send Allow-Credentials then).
+      origins:
+        - https://shop.example.com
+      credentials: true
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 5
+      size_unit: megabytes
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid
