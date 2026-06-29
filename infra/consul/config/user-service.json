@@ -1,0 +1,16 @@
+{
+  "service": {
+    "name": "user-service",
+    "id": "user-service-1",
+    "address": "user-service",
+    "port": 8081,
+    "tags": ["http"],
+    "checks": [
+      {
+        "http": "http://user-service:8081/actuator/health",
+        "interval": "10s",
+        "timeout": "5s"
+      }
+    ]
+  }
+}

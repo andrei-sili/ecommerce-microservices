@@ -1,7 +1,13 @@
-# Wave 3 — add RabbitMQ broker + Payment + Notification services.
-# Topology (exchanges/queues/DLQs) is declared idempotently by each service at
-# startup (Spring AMQP / aio-pika). No pre-loaded definitions file — RabbitMQ
-# boots with RABBITMQ_DEFAULT_USER/PASS and the services handle the rest.
+# Wave 4 — single edge. Kong (API Gateway) is the only host ingress on :8000; the 6 app
+# services, the 6 DBs and RabbitMQ AMQP are no longer published to the host (reachable only
+# on ecommerce-net by name). Kong routes via Docker DNS with its own active health checks;
+# Consul is the live registry / health-catalog / UI, out of Kong's request path. Published host
+# ports after this wave: Kong :8000, Consul :8500/:8600, RabbitMQ UI :15672. Dev-only direct
+# port access lives in the gitignored docker-compose.override.yml (auto-loaded when no -f is passed).
+#
+# Wave 3 — RabbitMQ broker + Payment + Notification. Topology (exchanges/queues/DLQs) is
+# declared idempotently by each service at startup (Spring AMQP / aio-pika). No pre-loaded
+# definitions file — RabbitMQ boots with RABBITMQ_DEFAULT_USER/PASS and services handle the rest.
 
 name: ecommerce
 
@@ -14,8 +20,6 @@ services:
       POSTGRES_USER: ${USER_DB_USER}
       POSTGRES_PASSWORD: ${USER_DB_PASSWORD}
       POSTGRES_DB: ${USER_DB_NAME}
-    ports:
-      - "5432:5432"
     volumes:
       - user-db-data:/var/lib/postgresql/data
     networks:
@@ -35,8 +39,6 @@ services:
       POSTGRES_USER: ${PRODUCT_DB_USER}
       POSTGRES_PASSWORD: ${PRODUCT_DB_PASSWORD}
       POSTGRES_DB: ${PRODUCT_DB_NAME}
-    ports:
-      - "5433:5432"
     volumes:
       - product-db-data:/var/lib/postgresql/data
     networks:
@@ -56,8 +58,6 @@ services:
       POSTGRES_USER: ${ORDER_DB_USER}
       POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
       POSTGRES_DB: ${ORDER_DB_NAME}
-    ports:
-      - "5434:5432"
     volumes:
       - order-db-data:/var/lib/postgresql/data
     networks:
@@ -77,8 +77,6 @@ services:
       POSTGRES_USER: ${CART_DB_USER}
       POSTGRES_PASSWORD: ${CART_DB_PASSWORD}
       POSTGRES_DB: ${CART_DB_NAME}
-    ports:
-      - "5435:5432"
     volumes:
       - cart-db-data:/var/lib/postgresql/data
     networks:
@@ -98,8 +96,6 @@ services:
       POSTGRES_USER: ${PAYMENT_DB_USER}
       POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD}
       POSTGRES_DB: ${PAYMENT_DB_NAME}
-    ports:
-      - "5436:5432"
     volumes:
       - payment-db-data:/var/lib/postgresql/data
     networks:
@@ -119,8 +115,6 @@ services:
       POSTGRES_USER: ${NOTIFICATION_DB_USER}
       POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
       POSTGRES_DB: ${NOTIFICATION_DB_NAME}
-    ports:
-      - "5437:5432"
     volumes:
       - notification-db-data:/var/lib/postgresql/data
     networks:
@@ -150,8 +144,6 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-    ports:
-      - "8081:8081"
     networks:
       - ecommerce-net
     healthcheck:
@@ -179,8 +171,6 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # TTL for stock reservations; sweeper releases RESERVED rows past this deadline.
       RESERVATION_TTL_MINUTES: ${RESERVATION_TTL_MINUTES}
-    ports:
-      - "8082:8082"
     networks:
       - ecommerce-net
     healthcheck:
@@ -208,8 +198,6 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Override the bare-hostname default (http://product:8082) with the compose DNS name.
       PRODUCT_SERVICE_URL: http://product-service:8082
-    ports:
-      - "8083:8083"
     networks:
       - ecommerce-net
     healthcheck:
@@ -245,8 +233,6 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
-    ports:
-      - "8084:8084"
     networks:
       - ecommerce-net
     healthcheck:
@@ -269,7 +255,7 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     ports:
-      - "5672:5672"
+      # AMQP 5672 is intra-network only now; only the management UI is published.
       - "15672:15672"
     networks:
       - ecommerce-net
@@ -306,8 +292,6 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
-    ports:
-      - "8085:8085"
     networks:
       - ecommerce-net
     healthcheck:
@@ -337,8 +321,6 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
-    ports:
-      - "8086:8086"
     networks:
       - ecommerce-net
     healthcheck:
@@ -348,6 +330,79 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+
+  # --- Wave 4: Service Discovery (Consul) + API Gateway (Kong) ---
+
+  consul:
+    # 1.22.7 is the latest published patch of the contract's mature 1.22 line
+    # (1.22.9 was specified but is not published; flagged to Lead).
+    image: hashicorp/consul:1.22.7
+    container_name: ecommerce-consul
+    restart: unless-stopped
+    # Registry / health-catalog / UI only — out of Kong's request path, so no -recursor and no
+    # static IP are needed (both existed only so Kong could use Consul as its DNS resolver).
+    # Consul resolves its own .consul catalog natively and runs HTTP health checks via Docker DNS.
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=ecommerce -data-dir=/consul/data -config-dir=/consul/config
+    environment:
+      # The image entrypoint chowns /consul/config on boot, which fails on the read-only
+      # mount and crash-loops the agent. Disabling perm management skips that chown so the
+      # config dir can stay :ro (config can't be tampered from inside the container).
+      CONSUL_DISABLE_PERM_MGMT: "true"
+    volumes:
+      - ./consul/config:/consul/config:ro
+      - consul-data:/consul/data
+    ports:
+      - "8500:8500"
+      - "8600:8600/tcp"
+      - "8600:8600/udp"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD", "consul", "members"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  kong:
+    image: kong:3.9.3
+    container_name: ecommerce-kong
+    restart: unless-stopped
+    depends_on:
+      consul:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: "0.0.0.0:8000"
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      KONG_LOG_LEVEL: notice
+    volumes:
+      - ./kong/kong.yml:/kong/kong.yml:ro
+    ports:
+      # Proxy ONLY — never 8001/8444 (Admin) or 8100 (status).
+      - "8000:8000"
+    networks:
+      - ecommerce-net
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 networks:
   ecommerce-net:
@@ -362,3 +417,4 @@ volumes:
   payment-db-data:
   notification-db-data:
   rabbitmq-data:
+  consul-data:

@@ -1,0 +1,16 @@
+{
+  "service": {
+    "name": "payment-service",
+    "id": "payment-service-1",
+    "address": "payment-service",
+    "port": 8085,
+    "tags": ["http"],
+    "checks": [
+      {
+        "http": "http://payment-service:8085/actuator/health",
+        "interval": "10s",
+        "timeout": "5s"
+      }
+    ]
+  }
+}
