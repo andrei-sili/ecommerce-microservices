@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/component: app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: notification-service
+        app.kubernetes.io/component: app
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: wait-for-db
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - until pg_isready -h notification-db -p 5432; do echo "waiting for notification-db"; sleep 2; done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
+      containers:
+        - name: notification-service
+          image: ecommerce/notification-service:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8086
+          envFrom:
+            - configMapRef:
+                name: notification-config
+          env:
+            # DB user/password come from the Secret; DATABASE_URL is assembled in-pod so the
+            # password never lives as a literal in a committed manifest (mirrors compose).
+            - name: NOTIFICATION_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: NOTIFICATION_DB_USER
+            - name: NOTIFICATION_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: NOTIFICATION_DB_PASSWORD
+            - name: DATABASE_URL
+              value: postgresql+asyncpg://$(NOTIFICATION_DB_USER):$(NOTIFICATION_DB_PASSWORD)@notification-db:5432/notification_db
+            - name: EMAIL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: EMAIL_API_KEY
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: RABBITMQ_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 96Mi
+            limits:
+              memory: 192Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL

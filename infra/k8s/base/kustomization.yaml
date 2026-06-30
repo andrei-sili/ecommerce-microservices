@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Wave 5a base: the Compose compute + data plane ported to Kubernetes 1:1.
+# K8s Service names match the Compose DNS names so every east-west URL / datasource
+# string is unchanged (no service code change). Kong + Consul are NOT here (Wave 5b).
+
+resources:
+  - namespace.yaml
+  # Application services (Service name == Compose DNS name == east-west URL host)
+  - user/deployment.yaml
+  - user/service.yaml
+  - product/deployment.yaml
+  - product/service.yaml
+  - cart/deployment.yaml
+  - cart/service.yaml
+  - order/deployment.yaml
+  - order/service.yaml
+  - payment/deployment.yaml
+  - payment/service.yaml
+  - notification/deployment.yaml
+  - notification/service.yaml
+  # Database-per-service: one StatefulSet + headless Service each
+  - databases/user-db.yaml
+  - databases/product-db.yaml
+  - databases/order-db.yaml
+  - databases/cart-db.yaml
+  - databases/payment-db.yaml
+  - databases/notification-db.yaml
+  # Async broker
+  - rabbitmq/rabbitmq.yaml
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: ecommerce
+    includeSelectors: false

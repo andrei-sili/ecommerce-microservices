@@ -1,0 +1,83 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ecommerce
+
+resources:
+  - ../../base
+
+# --- Non-secret config (committed) -------------------------------------------
+# Per-service so the per-service SPRING_DATASOURCE_URL keys do not collide.
+# JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 keeps heap (~256Mi) + non-heap under
+# the 512Mi limit so the JVMs don't OOMKill on 8 GB. NOTE: user-service's
+# Dockerfile hardcodes -XX:MaxRAMPercentage=75.0 in its ENTRYPOINT, and a
+# command-line -XX arg WINS over JAVA_TOOL_OPTIONS (verified) — so this env is a
+# no-op for user-service until dev-java drops/lowers that Dockerfile flag.
+configMapGenerator:
+  - name: user-config
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://user-db:5432/user_db
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+  - name: product-config
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://product-db:5432/product_db
+      - RESERVATION_TTL_MINUTES=30
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+  - name: cart-config
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://cart-db:5432/cart_db
+      - PRODUCT_SERVICE_URL=http://product-service:8082
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+  - name: order-config
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://order-db:5432/order_db
+      - CART_SERVICE_URL=http://cart-service:8083
+      - PRODUCT_SERVICE_URL=http://product-service:8082
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_VHOST=/
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+  - name: payment-config
+    literals:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://payment-db:5432/payment_db
+      - ORDER_SERVICE_URL=http://order-service:8084
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_VHOST=/
+      - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+  - name: notification-config
+    literals:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_VHOST=/
+  - name: user-db-config
+    literals:
+      - POSTGRES_DB=user_db
+  - name: product-db-config
+    literals:
+      - POSTGRES_DB=product_db
+  - name: order-db-config
+    literals:
+      - POSTGRES_DB=order_db
+  - name: cart-db-config
+    literals:
+      - POSTGRES_DB=cart_db
+  - name: payment-db-config
+    literals:
+      - POSTGRES_DB=payment_db
+  - name: notification-db-config
+    literals:
+      - POSTGRES_DB=notification_db
+  - name: rabbitmq-config
+    literals:
+      - RABBITMQ_DEFAULT_VHOST=/
+
+# --- Secrets (NEVER committed) -----------------------------------------------
+# Reads the GITIGNORED infra/k8s/overlays/local/secret.env (same key scheme as
+# infra/.env). Workloads consume individual keys via secretKeyRef so no
+# service's container env carries another service's credentials. The content
+# hash rolls pods automatically when a value changes.
+secretGenerator:
+  - name: ecommerce-secrets
+    envs:
+      - secret.env
