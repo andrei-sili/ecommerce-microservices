@@ -102,7 +102,7 @@ kubectl -n ecommerce rollout status deploy/rabbitmq --timeout=240s
 log "waiting for application services"
 kubectl -n ecommerce rollout status deploy/user-service deploy/product-service \
   deploy/cart-service deploy/order-service deploy/payment-service deploy/notification-service \
-  --timeout=300s || true
+  --timeout=300s
 
 log "pods:"
 kubectl get pods -n ecommerce -o wide
