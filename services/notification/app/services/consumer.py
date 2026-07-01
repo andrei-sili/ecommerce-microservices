@@ -46,6 +46,19 @@ QUEUE_ORDER = "notification.order-events"
 QUEUE_PAYMENT = "notification.payment-events"
 
 
+async def _on_reconnect(sender: object, *args: object, **kwargs: object) -> None:
+    """Observability-only reconnect hook — logs, never touches topology.
+
+    aio-pika's connect_robust already re-declares the exchange/queue/binding and
+    re-attaches the consumer on every reconnect (even to a fresh empty broker).
+    Re-declaring or re-consuming here would attach a SECOND consumer (consumers=2),
+    splitting delivery and risking duplicate emails — so this hook only records the
+    event. The (object, *args, **kwargs) signature absorbs aio-pika's callback-arg
+    drift across versions.
+    """
+    logger.warning("RabbitMQ connection restored; robust topology auto-recovered")
+
+
 async def _declare_topology(channel: aio_pika.abc.AbstractChannel) -> tuple[
     aio_pika.abc.AbstractExchange,
     aio_pika.abc.AbstractQueue,
@@ -234,6 +247,7 @@ async def run_consumer(
     """Connect to RabbitMQ, declare topology, and consume until shutdown_event is set."""
     logger.info("Consumer connecting to RabbitMQ")
     connection = await aio_pika.connect_robust(rabbitmq_url)
+    connection.reconnect_callbacks.add(_on_reconnect)
     try:
         channel = await connection.channel()
         await channel.set_qos(prefetch_count=10)
