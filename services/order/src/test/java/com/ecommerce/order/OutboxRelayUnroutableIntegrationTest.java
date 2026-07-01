@@ -7,7 +7,10 @@ import com.ecommerce.order.model.OutboxEvent;
 import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.support.AbstractIntegrationTest;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -67,8 +70,9 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     registry.add("spring.rabbitmq.password", RABBIT::getAdminPassword);
     // Let RabbitAdmin declare Order's own topology (the ecommerce.events exchange) at startup.
     registry.add("spring.rabbitmq.dynamic", () -> "true");
-    registry.add("spring.rabbitmq.publisher-confirm-type", () -> "correlated");
-    registry.add("spring.rabbitmq.publisher-returns", () -> "true");
+    // NB: publisher-confirm-type=correlated + publisher-returns=true are intentionally NOT set
+    // here — they are sourced from application.yml (mirroring production), so reverting them there
+    // turns this test RED. Only container-specific wiring is overridden above.
   }
 
   @Autowired private OutboxRelay outboxRelay;
@@ -84,6 +88,9 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     // Order declares its own topology: ecommerce.events (+ its payment-events queue) exists, but
     // notification.order-events (the consumer's durable queue) is deliberately absent here.
     rabbitAdmin.initialize();
+    // Clean slate: a prior test may have declared the durable consumer queue; remove it so the
+    // "no binding → unroutable" precondition holds for every test (queueDelete is idempotent).
+    rabbitAdmin.deleteQueue(CONSUMER_QUEUE);
   }
 
   @Test
@@ -101,10 +108,7 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
         .isNull();
 
     // ---- The consumer now declares its durable queue + binding (simulating Notification). ----
-    Queue queue = QueueBuilder.durable(CONSUMER_QUEUE).build();
-    rabbitAdmin.declareQueue(queue);
-    rabbitAdmin.declareBinding(
-        BindingBuilder.bind(queue).to(new TopicExchange(EXCHANGE, true, false)).with(ROUTING_KEY));
+    bindConsumerQueue();
 
     // ---- GREEN: same row is now routable → confirmed, not returned → published AND delivered.
     // ----
@@ -123,14 +127,92 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     assertThat(new String(delivered.getBody())).contains(ORDER_ID);
   }
 
+  /**
+   * Per-row marking under a MIXED batch drained in a single pass. The relay derives one routing key
+   * ({@code order.placed}) for Order's only event type, so a "routable + returned in the same
+   * drain" pair isn't constructible without a second routing key; instead this proves:
+   *
+   * <ol>
+   *   <li>a batch of several unroutable rows ALL stay {@code published_at IS NULL} (the fix holds
+   *       for N&gt;1, not just the single-row path — an ack-only relay would wrongly mark every
+   *       one);
+   *   <li>in one drain that mixes routable rows with a non-publishable row, ONLY the routable rows
+   *       get {@code published_at} while the other stays NULL and is retried; and
+   *   <li>every routable row is delivered to the consumer queue (zero loss across a batch).
+   * </ol>
+   */
+  @Test
+  void mixedBatch_onlyRoutableRowsMarked_othersStayNull() {
+    OutboxEvent a = insertRow("11111111-aaaa-1111-aaaa-111111111111", "OrderPlaced");
+    OutboxEvent b = insertRow("22222222-bbbb-2222-bbbb-222222222222", "OrderPlaced");
+    // A row the relay never sends (unmapped type) — must never be marked, mixed in the same batch.
+    OutboxEvent skipped = insertRow("33333333-cccc-3333-cccc-333333333333", "OrderShipped");
+
+    // ---- Batch drain with NO binding: both OrderPlaced rows are returned unroutable. ----
+    outboxRelay.drain();
+
+    assertThat(outboxEventRepository.findById(a.getId()).orElseThrow().getPublishedAt())
+        .as("row A (unroutable) must stay NULL in a batch")
+        .isNull();
+    assertThat(outboxEventRepository.findById(b.getId()).orElseThrow().getPublishedAt())
+        .as("row B (unroutable) must stay NULL in a batch")
+        .isNull();
+    assertThat(outboxEventRepository.findById(skipped.getId()).orElseThrow().getPublishedAt())
+        .as("unmapped row must stay NULL")
+        .isNull();
+
+    // ---- Bind the queue, then drain a MIXED batch: A + B routable, the unmapped row still not.
+    // ----
+    bindConsumerQueue();
+    outboxRelay.drain();
+
+    assertThat(outboxEventRepository.findById(a.getId()).orElseThrow().getPublishedAt())
+        .as("row A must be marked published once routable")
+        .isNotNull();
+    assertThat(outboxEventRepository.findById(b.getId()).orElseThrow().getPublishedAt())
+        .as("row B must be marked published once routable")
+        .isNotNull();
+    assertThat(outboxEventRepository.findById(skipped.getId()).orElseThrow().getPublishedAt())
+        .as("the unmapped row must remain NULL in the mixed drain — only routable rows are marked")
+        .isNull();
+
+    // Both routable events are delivered (zero loss across the batch); exactly two, no duplicates.
+    List<String> deliveredBodies = new ArrayList<>();
+    for (int i = 0; i < 2; i++) {
+      Message msg = rabbitTemplate.receive(CONSUMER_QUEUE, 5000);
+      assertThat(msg).as("expected a delivered message from the batch").isNotNull();
+      assertThat(msg.getMessageProperties().getType()).isEqualTo("OrderPlaced");
+      deliveredBodies.add(new String(msg.getBody(), StandardCharsets.UTF_8));
+    }
+    String all = String.join("\n", deliveredBodies);
+    assertThat(all)
+        .as("both routable orders delivered, none lost")
+        .contains("11111111-aaaa-1111-aaaa-111111111111")
+        .contains("22222222-bbbb-2222-bbbb-222222222222");
+    assertThat(rabbitTemplate.receive(CONSUMER_QUEUE, 500))
+        .as("no extra/duplicate delivery")
+        .isNull();
+  }
+
+  private void bindConsumerQueue() {
+    Queue queue = QueueBuilder.durable(CONSUMER_QUEUE).build();
+    rabbitAdmin.declareQueue(queue);
+    rabbitAdmin.declareBinding(
+        BindingBuilder.bind(queue).to(new TopicExchange(EXCHANGE, true, false)).with(ROUTING_KEY));
+  }
+
   private OutboxEvent insertOrderPlacedRow() {
+    return insertRow(ORDER_ID, "OrderPlaced");
+  }
+
+  private OutboxEvent insertRow(String orderId, String eventType) {
     return outboxEventRepository.save(
         new OutboxEvent(
             "Order",
-            ORDER_ID,
-            "OrderPlaced",
+            orderId,
+            eventType,
             "{\"orderId\":\""
-                + ORDER_ID
+                + orderId
                 + "\",\"userId\":7,\"items\":[{\"productId\":42,\"quantity\":2,"
                 + "\"unitPrice\":19.99}],\"total\":39.98,\"currency\":\"EUR\","
                 + "\"occurredAt\":\"2026-06-26T10:00:00Z\"}",
