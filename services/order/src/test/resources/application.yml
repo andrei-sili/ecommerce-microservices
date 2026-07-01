@@ -20,6 +20,11 @@ spring:
     password: guest
     # Prevents RabbitAdmin from connecting and declaring topology at startup.
     dynamic: false
+    # Load-bearing for the relay's "broker confirm != routable" logic — mirrors production
+    # application.yml. The unroutable-relay integration test sources these from here (NOT from a
+    # @DynamicPropertySource override), so dropping either one turns that test RED.
+    publisher-confirm-type: correlated
+    publisher-returns: true
     listener:
       simple:
         acknowledge-mode: manual
