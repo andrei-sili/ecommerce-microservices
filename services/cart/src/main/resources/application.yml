@@ -8,6 +8,18 @@ spring:
     url: ${SPRING_DATASOURCE_URL}
     username: ${SPRING_DATASOURCE_USERNAME}
     password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      # Fail fast when the DB IP vanishes (K8s pod loss) so readiness flips within the probe
+      # window; thresholds sit above normal OLTP latency to avoid flapping on transient load.
+      connection-timeout: 8000
+      validation-timeout: 3000
+      keepalive-time: 30000
+      data-source-properties:
+        # socketTimeout (s): bounds a read on a connection to a gone IP instead of blocking
+        # ~15 min on Linux TCP retransmission. Decisive lever for pod-loss detection.
+        socketTimeout: 10
+        connectTimeout: 5
+        tcpKeepAlive: true
   jpa:
     hibernate:
       ddl-auto: validate
@@ -42,3 +54,6 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,db

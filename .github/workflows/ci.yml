@@ -98,3 +98,33 @@ jobs:
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Render the Kustomize local overlay and schema-validate every manifest. Runs in
+  # parallel to validate-compose. A real gate: a broken/invalid manifest fails the PR.
+  # No cluster is created; secrets never leave the gitignored secret.env (CI fabricates
+  # a placeholder one only so the secretGenerator can build).
+  validate-k8s:
+    name: Validate k8s manifests (kubeconform)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install kustomize + kubeconform (pinned, checksum-verified)
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          curl -sSLf -o kustomize.tgz \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.1/kustomize_v5.8.1_linux_amd64.tar.gz"
+          echo "029a7f0f4e1932c52a0476cf02a0fd855c0bb85694b82c338fc648dcb53a819d  kustomize.tgz" | sha256sum -c -
+          tar -xzf kustomize.tgz && sudo install -m 0755 kustomize /usr/local/bin/kustomize
+          curl -sSLf -o kubeconform.tgz \
+            "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
+          echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  kubeconform.tgz" | sha256sum -c -
+          tar -xzf kubeconform.tgz kubeconform && sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+      - name: Seed placeholder secret.env (the real one is gitignored; never committed)
+        working-directory: infra/k8s/overlays/local
+        run: cp secret.env.example secret.env
+      - name: Render and validate manifests
+        run: |
+          kustomize build infra/k8s/overlays/local \
+            | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default
