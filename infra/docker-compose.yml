@@ -1,9 +1,11 @@
-# Wave 4 — single edge. Kong (API Gateway) is the only host ingress on :8000; the 6 app
+# Wave 4 / 5b — single edge. Kong (API Gateway) is the only host ingress on :8000; the 6 app
 # services, the 6 DBs and RabbitMQ AMQP are no longer published to the host (reachable only
-# on ecommerce-net by name). Kong routes via Docker DNS with its own active health checks;
-# Consul is the live registry / health-catalog / UI, out of Kong's request path. Published host
-# ports after this wave: Kong :8000, Consul :8500/:8600, RabbitMQ UI :15672. Dev-only direct
-# port access lives in the gitignored docker-compose.override.yml (auto-loaded when no -f is passed).
+# on ecommerce-net by name). Kong routes via Docker DNS with its own active health checks
+# (Docker DNS resolves dead containers, so the Compose edge KEEPS its upstreams+active checks).
+# Wave 5b retired Consul: it was catalog/UI-only, never in Kong's request path, so removing it
+# is safe; the K8s stack does discovery + health-gated routing natively (CoreDNS + readiness).
+# Published host ports: Kong :8000, RabbitMQ UI :15672. Dev-only direct port access lives in the
+# gitignored docker-compose.override.yml (auto-loaded when no -f is passed).
 #
 # Wave 3 — RabbitMQ broker + Payment + Notification. Topology (exchanges/queues/DLQs) is
 # declared idempotently by each service at startup (Spring AMQP / aio-pika). No pre-loaded
@@ -331,46 +333,13 @@ services:
       retries: 10
       start_period: 60s
 
-  # --- Wave 4: Service Discovery (Consul) + API Gateway (Kong) ---
-
-  consul:
-    # 1.22.7 is the latest published patch of the contract's mature 1.22 line
-    # (1.22.9 was specified but is not published; flagged to Lead).
-    image: hashicorp/consul:1.22.7
-    container_name: ecommerce-consul
-    restart: unless-stopped
-    # Registry / health-catalog / UI only — out of Kong's request path, so no -recursor and no
-    # static IP are needed (both existed only so Kong could use Consul as its DNS resolver).
-    # Consul resolves its own .consul catalog natively and runs HTTP health checks via Docker DNS.
-    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -datacenter=ecommerce -data-dir=/consul/data -config-dir=/consul/config
-    environment:
-      # The image entrypoint chowns /consul/config on boot, which fails on the read-only
-      # mount and crash-loops the agent. Disabling perm management skips that chown so the
-      # config dir can stay :ro (config can't be tampered from inside the container).
-      CONSUL_DISABLE_PERM_MGMT: "true"
-    volumes:
-      - ./consul/config:/consul/config:ro
-      - consul-data:/consul/data
-    ports:
-      - "8500:8500"
-      - "8600:8600/tcp"
-      - "8600:8600/udp"
-    networks:
-      - ecommerce-net
-    healthcheck:
-      test: ["CMD", "consul", "members"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+  # --- Wave 4: API Gateway (Kong) — the single host ingress ---
 
   kong:
     image: kong:3.9.3
     container_name: ecommerce-kong
     restart: unless-stopped
     depends_on:
-      consul:
-        condition: service_healthy
       user-service:
         condition: service_healthy
       product-service:
@@ -417,4 +386,3 @@ volumes:
   payment-db-data:
   notification-db-data:
   rabbitmq-data:
-  consul-data:

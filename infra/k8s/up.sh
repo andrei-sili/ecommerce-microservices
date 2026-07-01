@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # One-command local bring-up: k3d single-node cluster -> build images -> side-load ->
-# apply the Kustomize local overlay. Wave 5a (no Kong/Consul yet; north-south via
-# `kubectl port-forward`). Idempotent: safe to re-run.
+# apply the Kustomize local overlay. Wave 5b: Kong is the single north-south edge on
+# http://localhost:8000 (NodePort 30080); Consul is retired (native CoreDNS + readiness
+# gating). Idempotent: safe to re-run.
 set -euo pipefail
 
 CLUSTER="ecommerce"
@@ -22,7 +23,7 @@ APP_IMAGES=(
   ecommerce/payment-service:dev
   ecommerce/notification-service:dev
 )
-THIRD_PARTY_IMAGES=(postgres:16-alpine rabbitmq:3-management-alpine)
+THIRD_PARTY_IMAGES=(postgres:16-alpine rabbitmq:3-management-alpine kong:3.9.3)
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
@@ -103,14 +104,18 @@ log "waiting for application services"
 kubectl -n ecommerce rollout status deploy/user-service deploy/product-service \
   deploy/cart-service deploy/order-service deploy/payment-service deploy/notification-service \
   --timeout=300s
+log "waiting for the Kong edge"
+kubectl -n ecommerce rollout status deploy/kong --timeout=180s
 
 log "pods:"
 kubectl get pods -n ecommerce -o wide
 
 cat <<EOF
 
-Stack is up. North-south has no edge in 5a (Kong arrives in 5b). Reach a service with:
-  kubectl -n ecommerce port-forward svc/user-service 8081:8081
-  kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672   # management UI
+Stack is up. North-south goes through the single Kong edge on http://localhost:8000
+(host :8000 -> NodePort 30080 -> Kong :8000):
+  curl http://localhost:8000/api/v1/products          # -> product-service via Kong
+The RabbitMQ management UI has no public route (internal only) — reach it with:
+  kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672
 Teardown (DATA LOSS): infra/k8s/down.sh
 EOF

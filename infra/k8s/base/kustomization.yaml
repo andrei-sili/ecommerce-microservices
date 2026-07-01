@@ -3,7 +3,9 @@ kind: Kustomization
 
 # Wave 5a base: the Compose compute + data plane ported to Kubernetes 1:1.
 # K8s Service names match the Compose DNS names so every east-west URL / datasource
-# string is unchanged (no service code change). Kong + Consul are NOT here (Wave 5b).
+# string is unchanged (no service code change).
+# Wave 5b: Kong is the single north-south edge (kong/); Consul is retired — CoreDNS +
+# kube-proxy + pod readiness are the native registry + health-gated router.
 
 resources:
   - namespace.yaml
@@ -29,6 +31,19 @@ resources:
   - databases/notification-db.yaml
   # Async broker
   - rabbitmq/rabbitmq.yaml
+  # North-south edge (Wave 5b): single NodePort ingress, DB-less declarative Kong
+  - kong/deployment.yaml
+  - kong/service.yaml
+
+# Kong's declarative config as a hashed ConfigMap. Generated in base (not the overlay)
+# because kustomize's default root-only load restrictor forbids the overlay from reading
+# a file under base/; the content-hash suffix still rolls the Kong pod on every kong.yml
+# edit (Kong does not hot-reload the file), and the name reference is rewritten in the
+# Deployment volume across base+overlay.
+configMapGenerator:
+  - name: kong-config
+    files:
+      - kong.yml=kong/kong.yml
 
 labels:
   - pairs:

@@ -1,13 +1,15 @@
-# Local Kubernetes (Wave 5a) — k3d + Kustomize
+# Local Kubernetes (Wave 5a + 5b) — k3d + Kustomize
 
 Ports the Compose **compute + data plane** onto a local **k3d** single-node cluster: the 6
-application services, their 6 Postgres databases (database-per-service), and RabbitMQ — 13 pods
-in one `ecommerce` namespace.
+application services, their 6 Postgres databases (database-per-service), RabbitMQ, and (Wave 5b)
+**Kong** as the single north-south edge — **14 pods** in one `ecommerce` namespace.
 
-**Out of scope in 5a:** Kong (API gateway) and Consul are **not** ported (Wave 5b); observability
-and a registry/GHCR come later (5c/5d). There is **no single north-south edge yet** — reach a
-service with `kubectl port-forward`. The committed `infra/docker-compose.yml` stays the untouched,
-still-working baseline; nothing here changes it or any service code.
+**Wave 5b (this doc):** Kong is the only host ingress, exposed as a `NodePort` on
+`http://localhost:8000`; **Consul is retired** — Kubernetes does discovery + health-gated routing
+natively (CoreDNS is the registry; kube-proxy + pod readiness are the router), so Kong's Wave-4
+active health checks were deleted. **Out of scope:** observability and a registry/GHCR come later
+(5c/5d). The committed `infra/docker-compose.yml` stays a still-working baseline (Consul removed
+there too, but it keeps Kong's Docker-DNS upstreams + active checks); nothing here changes service code.
 
 K8s **Service names are identical to the Compose DNS names** (`user-service`, `product-service`,
 …, `user-db`, …, `rabbitmq`), so every east-west URL and JDBC/DSN string is unchanged and CoreDNS
@@ -47,21 +49,56 @@ make -C infra k8s-up        # or: bash infra/k8s/up.sh
 ```
 
 `up.sh` is idempotent and does: inotify check → `k3d cluster create ecommerce` (single node,
-Traefik disabled, host `:8000` → NodePort `30080` reserved for Kong in 5b) → `docker compose build`
+Traefik disabled, host `:8000` → NodePort `30080` for Kong) → `docker compose build`
 the `ecommerce/*-service:dev` images → `k3d image import` (app + `postgres:16-alpine` +
-`rabbitmq:3-management-alpine`; no registry in 5a) → seed a `secret.env` if missing →
-`kubectl apply -k overlays/local` → wait for rollout.
+`rabbitmq:3-management-alpine` + `kong:3.9.3`; no registry yet) → seed a `secret.env` if missing →
+`kubectl apply -k overlays/local` → wait for rollout (incl. `deploy/kong`).
 
 ```bash
-kubectl get pods -n ecommerce      # expect 13 Ready (6 svc + 6 db + rabbitmq)
+kubectl get pods -n ecommerce      # expect 14 Ready (6 svc + 6 db + rabbitmq + kong)
 ```
 
-## North-south access (no Kong yet)
+## North-south access — the Kong edge on `:8000`
+
+Kong is the **only** host-reachable ingress: host `:8000` → NodePort `30080` → Kong proxy `:8000`
+→ the target service's ClusterIP. Every public path is `/api/v1/...` (see the route table in
+`base/kong/kong.yml`).
 
 ```bash
-kubectl -n ecommerce port-forward svc/user-service 8081:8081     # then curl localhost:8081/api/v1/...
+curl http://localhost:8000/api/v1/products                       # -> product-service via Kong
+# register + login through the edge, then call an authed endpoint with the returned JWT:
+curl -X POST http://localhost:8000/api/v1/auth/login -H 'Content-Type: application/json' -d '{...}'
+```
+
+The app/DB ClusterIP Services are **not** host-reachable except via `kubectl port-forward`; the
+RabbitMQ management UI has no public Kong route:
+
+```bash
 kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672        # RabbitMQ management UI
 ```
+
+## Kong edge (Wave 5b)
+
+- **Shape:** a plain `Deployment` (`replicas: 1`) + a kustomize-generated `ConfigMap(kong.yml)` +
+  a `NodePort` `Service` (`nodePort: 30080`). DB-less declarative (`KONG_DATABASE=off`), Admin API
+  `off`, status API on `:8100` for the kubelet probes. Runs non-root (uid/gid **1001** —
+  `docker run --rm kong:3.9.3 id`) with a read-only rootfs (`emptyDir` at `/tmp` + `/kong_prefix`).
+- **Config-as-code:** `base/kong/kong.yml` is delivered by a `configMapGenerator`, so its
+  content-hash suffix **rolls the Kong pod on every edit** — Kong does **not** hot-reload a
+  declarative file, so a hand-written ConfigMap would silently serve stale config. Two Kong
+  configs exist by necessity: this K8s one points `services[].url` at ClusterIP names with **no**
+  `upstreams`/active checks; the Compose `infra/kong/kong.yml` keeps them (Docker DNS resolves
+  dead containers, K8s readiness does not).
+- **Down-edge is `502`, not `503`.** When a routed Service has **zero Ready** endpoints, kube-proxy
+  `REJECT`s the connection and Kong returns **`502 Bad Gateway`** (never `500`, never a stale
+  `200`); it auto-recovers to `200` once the pod is Ready again, for any outage length, with no
+  Kong reload. The Wave-4 ring-balancer `503` does not apply here (the ClusterIP peer is always
+  resolvable — it just fails to connect). Do **not** re-add `upstreams`+active checks to relabel
+  `502`→`503`; that re-adds the machinery this wave deletes.
+- **Edge gates (carried from Wave 4):** internal-route isolation by omission (`/api/v1/inventory/*`
+  → 404), the case-insensitive `/api/v1/payments/webhook` 404 block, 5/min cap on
+  `POST /api/v1/auth/login` over the global 120/min, trust-header strip, CORS, 5 MB size limit,
+  `correlation-id`. Auth is Option A: Kong holds **no** `JWT_SECRET`; each service validates locally.
 
 ## Secrets — nothing secret in git
 
@@ -108,6 +145,10 @@ kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672        # RabbitMQ man
   `/actuator/health/liveness` (in-process, does **not** touch DB/broker, so a brief DB outage never
   restarts the pod). The probe groups are already enabled in each service's `application.yml`.
 - notification (FastAPI): all three → `/health` on 8086.
+- Kong: `startupProbe`/`livenessProbe` → `/status`, `readinessProbe` → `/status/ready` (all on the
+  status port `8100`). Liveness deliberately uses `/status` (not `/status/ready`) so a config
+  hiccup can't restart-loop the pod; readiness gates the pod out of the Service until a valid,
+  non-empty config loads.
 
 ## Teardown
 
@@ -132,7 +173,9 @@ infra/k8s/
     {user,product,cart,order,payment,notification}/{deployment,service.yaml}
     databases/<svc>-db.yaml                # StatefulSet + headless Service ×6
     rabbitmq/rabbitmq.yaml                 # Deployment + PVC + Service
-    kustomization.yaml
+    kong/{deployment,service}.yaml         # DB-less edge + NodePort 30080
+    kong/kong.yml                          # declarative config -> hashed ConfigMap (generated in base)
+    kustomization.yaml                     # + configMapGenerator(kong-config)
   overlays/
     local/
       kustomization.yaml                   # configMapGenerator + secretGenerator, namespace

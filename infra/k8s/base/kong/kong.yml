@@ -1,29 +1,28 @@
-# Kong API Gateway — DB-less declarative config (Wave 4).
+# Kong API Gateway — DB-less declarative config (Wave 5b, Kubernetes edge).
 #
-# Single edge: client -> Kong :8000 -> service. East-west service-to-service calls
-# bypass Kong by design (over ecommerce-net), so each service KEEPS validating JWT /
-# INTERNAL_API_KEY / webhook HMAC locally — Kong is an outer gate, never the sole gate.
+# This is the K8s-specific config, SEPARATE from the Compose infra/kong/kong.yml.
+# Same routes/plugins, different routing substrate: on K8s each service points
+# directly at its ClusterIP Service URL and there are NO `upstreams` / active
+# health checks (deleted vs Wave 4).
+#
+# Single edge: client -> NodePort 30080 -> Kong :8000 -> service. East-west
+# service-to-service calls bypass Kong by design (over cluster DNS), so each service
+# KEEPS validating JWT / INTERNAL_API_KEY / webhook HMAC locally — Kong is an outer
+# gate, never the sole gate.
 #
 # Auth posture = Option A: Kong is NOT given JWT_SECRET. It does routing + per-IP rate
 # limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
 # Services validate the JWT signature/expiry themselves (unchanged). NO secrets in this file.
 #
-# Routing resolves through Docker DNS, health-gated by Kong's OWN active health checks: each
-# service `host` points at a Kong `upstream` whose single target is the Docker service name +
-# app port (`<svc>:<port>`), always resolvable on ecommerce-net via Docker's embedded resolver
-# (127.0.0.11). Each upstream carries healthchecks.active (HTTP /actuator/health): Kong probes
-# every target itself and drops an unhealthy one from the balancer — zero peers means Kong
-# returns 503, never a 500 from a bare unresolved host (500 is reserved for unexpected errors;
-# see .claude/rules/api-design.md). Kong keeps re-probing, so a recovered target re-enters the
-# balancer automatically — recovery for ANY outage length, no Kong reload. Docker DNS resolves
-# dead containers, so Kong owning routing health via active checks is REQUIRED on Compose — this
-# is exactly why the K8s edge (infra/k8s/base/kong/kong.yml) can drop upstreams+active checks and
-# let kube-proxy + pod readiness gate routing instead.
-#
-# (Wave 5b retired Consul: it was a catalog/health/UI sidecar, never in Kong's request path, so
-# removing it left routing unchanged. The early Consul-DNS routing attempt — which couldn't both
-# 503 cleanly while down AND recover after a >1 min outage — is superseded; see
-# agent_docs/research/kong-consul.md.)
+# Routing + health gating are NATIVE to Kubernetes — Consul is gone:
+#   - CoreDNS resolves each `<service>:<port>` to a ClusterIP (the Service object IS the registry).
+#   - EndpointSlice + kube-proxy load-balance ONLY across Ready pods.
+#   - The pod readiness probe (5a made it include `db`) gates routing: a DB-sick pod leaves the
+#     EndpointSlice, so Kong never routes to it — no Kong-side active health check needed.
+# Down-edge: when a routed Service has zero Ready endpoints, kube-proxy REJECTs the connection and
+# Kong returns 502 Bad Gateway (never a 500, never a stale 200); it auto-recovers to 200 once the
+# pod is Ready again, for any outage length, with no Kong reload. (Wave 4's ring-balancer 503 does
+# not apply here — the ClusterIP peer is always resolvable, it just fails to connect.)
 #
 # Every route sets strip_path: false because services already serve under /api/v1
 # (Kong's default strip_path: true would forward "/" and 404 the backend).
@@ -31,8 +30,7 @@ _format_version: "3.0"
 
 services:
   - name: user-service
-    host: user-upstream
-    protocol: http
+    url: http://user-service:8081
     routes:
       # More-specific path than /api/v1/auth, so Kong matches it first: ONLY login gets
       # the strict brute-force cap; register and the rest fall under the global 120/min.
@@ -63,8 +61,7 @@ services:
         strip_path: false
 
   - name: product-service
-    host: product-upstream
-    protocol: http
+    url: http://product-service:8082
     routes:
       # No route for /api/v1/inventory/* -> internal-only (isolation by omission -> 404).
       - name: products
@@ -80,8 +77,7 @@ services:
         strip_path: false
 
   - name: cart-service
-    host: cart-upstream
-    protocol: http
+    url: http://cart-service:8083
     routes:
       - name: cart
         paths:
@@ -94,8 +90,7 @@ services:
         strip_path: false
 
   - name: order-service
-    host: order-upstream
-    protocol: http
+    url: http://order-service:8084
     routes:
       - name: orders
         paths:
@@ -107,8 +102,7 @@ services:
         strip_path: false
 
   - name: payment-service
-    host: payment-upstream
-    protocol: http
+    url: http://payment-service:8085
     routes:
       # The webhook lives UNDER the public /api/v1/payments prefix, so a plain prefix
       # route would proxy it. This higher-specificity route matches first and terminates
@@ -144,118 +138,6 @@ services:
           - GET
           - POST
         strip_path: false
-
-# Docker-DNS upstreams: one per routed service, single target = <svc>:<port> (resolvable on
-# ecommerce-net via Docker's embedded resolver). Each carries healthchecks.active so Kong owns
-# routing health: a down target leaves the balancer (zero peers → 503), a recovered one
-# re-enters automatically (no Kong reload). All five routed services are Spring → /actuator/health.
-# (notification-service has no public route, so it needs no upstream.)
-upstreams:
-  - name: user-upstream
-    targets:
-      - target: user-service:8081
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        healthy:
-          interval: 5
-          successes: 3
-          http_statuses:
-            - 200
-        unhealthy:
-          interval: 5
-          http_failures: 3
-          tcp_failures: 3
-          timeouts: 3
-          http_statuses:
-            - 429
-            - 500
-            - 503
-  - name: product-upstream
-    targets:
-      - target: product-service:8082
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        healthy:
-          interval: 5
-          successes: 3
-          http_statuses:
-            - 200
-        unhealthy:
-          interval: 5
-          http_failures: 3
-          tcp_failures: 3
-          timeouts: 3
-          http_statuses:
-            - 429
-            - 500
-            - 503
-  - name: cart-upstream
-    targets:
-      - target: cart-service:8083
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        healthy:
-          interval: 5
-          successes: 3
-          http_statuses:
-            - 200
-        unhealthy:
-          interval: 5
-          http_failures: 3
-          tcp_failures: 3
-          timeouts: 3
-          http_statuses:
-            - 429
-            - 500
-            - 503
-  - name: order-upstream
-    targets:
-      - target: order-service:8084
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        healthy:
-          interval: 5
-          successes: 3
-          http_statuses:
-            - 200
-        unhealthy:
-          interval: 5
-          http_failures: 3
-          tcp_failures: 3
-          timeouts: 3
-          http_statuses:
-            - 429
-            - 500
-            - 503
-  - name: payment-upstream
-    targets:
-      - target: payment-service:8085
-    healthchecks:
-      active:
-        type: http
-        http_path: /actuator/health
-        healthy:
-          interval: 5
-          successes: 3
-          http_statuses:
-            - 200
-        unhealthy:
-          interval: 5
-          http_failures: 3
-          tcp_failures: 3
-          timeouts: 3
-          http_statuses:
-            - 429
-            - 500
-            - 503
 
 # Global plugins (no service/route binding) — apply to every route unless a more
 # specific (route-scoped) plugin of the same name overrides them.

@@ -31,6 +31,23 @@ spec:
               memory: 16Mi
             limits:
               memory: 32Mi
+        # Gate the consumer on RabbitMQ accepting AMQP: on a cold cluster start the app could
+        # otherwise connect before the broker is up, hit connection-refused, and its reconnect
+        # would not re-declare its queues — events would be published to the topic exchange with
+        # no binding and silently dropped. Reuses the already-imported rabbitmq image (nc).
+        - name: wait-for-rabbitmq
+          image: rabbitmq:3-management-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - until nc -z rabbitmq 5672; do echo "waiting for rabbitmq"; sleep 2; done
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 32Mi
       containers:
         - name: notification-service
           image: ecommerce/notification-service:dev
