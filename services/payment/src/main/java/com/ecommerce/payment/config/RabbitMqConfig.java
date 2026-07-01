@@ -1,15 +1,21 @@
 package com.ecommerce.payment.config;
 
 import org.springframework.amqp.core.TopicExchange;
-import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.Jackson2JsonMessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
  * Payment declares only the producer-side exchange. Consumer queues (order.payment-events,
  * notification.payment-events) are owned by their respective services or pre-declared by devops.
+ *
+ * <p>The {@code RabbitTemplate} is intentionally NOT customised here — it is Boot's auto-configured
+ * template. Driven by {@code spring.rabbitmq.publisher-confirm-type: correlated} and {@code
+ * publisher-returns: true}, it publishes {@code mandatory} with correlated publisher confirms and
+ * populates {@link org.springframework.amqp.rabbit.connection.CorrelationData#getReturned()} on a
+ * {@code basic.return}. A previous custom template registered a log-only returns-callback; combined
+ * with {@code waitForConfirmsOrDie} (which does not throw on an unroutable message) the relay
+ * marked every row published — including silently-dropped ones (event loss). The relay now reads
+ * the per-publish confirm + return via {@code CorrelationData}; see {@code OutboxRelay}.
  */
 @Configuration
 public class RabbitMqConfig {
@@ -18,33 +24,5 @@ public class RabbitMqConfig {
   @Bean
   public TopicExchange ecommerceEventsExchange() {
     return new TopicExchange("ecommerce.events", true, false);
-  }
-
-  /** Message converter — serialises to/from JSON consistently for the relay. */
-  @Bean
-  public Jackson2JsonMessageConverter messageConverter() {
-    return new Jackson2JsonMessageConverter();
-  }
-
-  /**
-   * Override the auto-configured RabbitTemplate to add a return callback that logs unroutable
-   * messages. Mandatory mode + publisher-confirm-type: correlated is already set via application
-   * properties.
-   */
-  @Bean
-  public RabbitTemplate rabbitTemplate(
-      ConnectionFactory connectionFactory, Jackson2JsonMessageConverter messageConverter) {
-    RabbitTemplate template = new RabbitTemplate(connectionFactory);
-    template.setMessageConverter(messageConverter);
-    template.setMandatory(true);
-    template.setReturnsCallback(
-        returned ->
-            org.slf4j.LoggerFactory.getLogger(RabbitMqConfig.class)
-                .warn(
-                    "Message returned unrouted: exchange={} routingKey={} replyCode={}",
-                    returned.getExchange(),
-                    returned.getRoutingKey(),
-                    returned.getReplyCode()));
-    return template;
   }
 }
