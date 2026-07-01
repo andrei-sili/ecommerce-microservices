@@ -13,12 +13,21 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
-  # RabbitMQ: use localhost during tests; OutboxRelay is @MockBean so no connection is opened.
+  # RabbitMQ: localhost during tests. Business tests @MockBean OutboxRelay so no connection opens;
+  # the non-mocked broker seam tests (OutboxRelay*IntegrationTest) point these at a Testcontainers
+  # broker via @DynamicPropertySource and flip `dynamic` back on.
   rabbitmq:
     host: localhost
     port: 5672
     username: guest
     password: guest
+    # No RabbitAdmin connecting/declaring topology at startup for the mocked-relay tests.
+    dynamic: false
+    # Load-bearing for the relay's "broker confirm != routable" logic — mirrors production
+    # application.yml. The broker seam tests source these from HERE (not a @DynamicPropertySource
+    # override), so dropping either one turns those tests RED.
+    publisher-confirm-type: correlated
+    publisher-returns: true
 
 server:
   port: 0
@@ -44,3 +53,9 @@ outbox:
     batch-size: 10
     confirm-timeout-ms: 5000
     fixed-delay-ms: 60000
+
+# Keeps @EnableScheduling (SchedulingConfig) off during tests so the relay never auto-fires; the
+# broker seam tests call OutboxRelay.drain() directly for deterministic red->green assertions.
+app:
+  scheduling:
+    enabled: false
