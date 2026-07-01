@@ -1,0 +1,117 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong
+  labels:
+    app.kubernetes.io/name: kong
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kong
+        app.kubernetes.io/component: gateway
+    spec:
+      automountServiceAccountToken: false
+      # emptyDir volumes are created world-writable, but fsGroup makes /tmp and
+      # /kong_prefix group-owned by the runtime gid so the non-root Kong user can
+      # write to them under readOnlyRootFilesystem.
+      securityContext:
+        fsGroup: 1001
+      # DB-less: nothing to wait for, so no initContainer (unlike the app pods).
+      containers:
+        - name: kong
+          image: kong:3.9.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KONG_DATABASE
+              value: "off"
+            - name: KONG_DECLARATIVE_CONFIG
+              value: /kong/kong.yml
+            - name: KONG_PROXY_LISTEN
+              value: 0.0.0.0:8000
+            # DB-less needs no admin writes — fully off (divergence from Compose's loopback :8001).
+            - name: KONG_ADMIN_LISTEN
+              value: "off"
+            # MANDATORY: the default 127.0.0.1:8007 is loopback, unreachable by kubelet probes.
+            - name: KONG_STATUS_LISTEN
+              value: 0.0.0.0:8100
+            - name: KONG_PREFIX
+              value: /kong_prefix
+            - name: KONG_PROXY_ACCESS_LOG
+              value: /dev/stdout
+            - name: KONG_PROXY_ERROR_LOG
+              value: /dev/stderr
+            # Single worker keeps Kong light on the 8 GB laptop (local edge, not throughput-bound).
+            - name: KONG_NGINX_WORKER_PROCESSES
+              value: "1"
+          ports:
+            - name: proxy
+              containerPort: 8000
+            - name: status
+              containerPort: 8100
+          startupProbe:
+            httpGet:
+              path: /status
+              port: status
+            periodSeconds: 2
+            failureThreshold: 30
+          # Liveness probes /status (NOT /status/ready): a config hiccup must not
+          # restart-loop the pod (Kong #830).
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: status
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness probes /status/ready: 200 only once a valid, non-empty config
+          # loads — gates the pod out of the Service endpoints until Kong can route.
+          readinessProbe:
+            httpGet:
+              path: /status/ready
+              port: status
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: declarative-config
+              mountPath: /kong/kong.yml
+              subPath: kong.yml
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            - name: kong-prefix
+              mountPath: /kong_prefix
+      volumes:
+        # kustomize rewrites this to the content-hashed name (kong-config-<hash>) so an
+        # edit to kong.yml rolls the pod — Kong does NOT hot-reload a declarative file.
+        - name: declarative-config
+          configMap:
+            name: kong-config
+            items:
+              - key: kong.yml
+                path: kong.yml
+        - name: tmp
+          emptyDir: {}
+        - name: kong-prefix
+          emptyDir: {}

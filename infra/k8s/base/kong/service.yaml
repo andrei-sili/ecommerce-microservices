@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong
+  labels:
+    app.kubernetes.io/name: kong
+    app.kubernetes.io/component: gateway
+spec:
+  # The single north-south edge: host :8000 (reserved by the 5a cluster as
+  # -p "8000:30080@server:0") -> node :30080 -> Kong proxy :8000. This is the ONLY
+  # NodePort in the namespace; app/DB Services stay ClusterIP-only. The status port
+  # (8100) is deliberately NOT exposed — probes reach it in-pod.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: kong
+  ports:
+    - name: proxy
+      port: 8000
+      targetPort: proxy
+      nodePort: 30080

@@ -1,0 +1,183 @@
+# Kong API Gateway — DB-less declarative config (Wave 5b, Kubernetes edge).
+#
+# This is the K8s-specific config, SEPARATE from the Compose infra/kong/kong.yml.
+# Same routes/plugins, different routing substrate: on K8s each service points
+# directly at its ClusterIP Service URL and there are NO `upstreams` / active
+# health checks (deleted vs Wave 4).
+#
+# Single edge: client -> NodePort 30080 -> Kong :8000 -> service. East-west
+# service-to-service calls bypass Kong by design (over cluster DNS), so each service
+# KEEPS validating JWT / INTERNAL_API_KEY / webhook HMAC locally — Kong is an outer
+# gate, never the sole gate.
+#
+# Auth posture = Option A: Kong is NOT given JWT_SECRET. It does routing + per-IP rate
+# limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
+# Services validate the JWT signature/expiry themselves (unchanged). NO secrets in this file.
+#
+# Routing + health gating are NATIVE to Kubernetes — Consul is gone:
+#   - CoreDNS resolves each `<service>:<port>` to a ClusterIP (the Service object IS the registry).
+#   - EndpointSlice + kube-proxy load-balance ONLY across Ready pods.
+#   - The pod readiness probe (5a made it include `db`) gates routing: a DB-sick pod leaves the
+#     EndpointSlice, so Kong never routes to it — no Kong-side active health check needed.
+# Down-edge: when a routed Service has zero Ready endpoints, kube-proxy REJECTs the connection and
+# Kong returns 502 Bad Gateway (never a 500, never a stale 200); it auto-recovers to 200 once the
+# pod is Ready again, for any outage length, with no Kong reload. (Wave 4's ring-balancer 503 does
+# not apply here — the ClusterIP peer is always resolvable, it just fails to connect.)
+#
+# Every route sets strip_path: false because services already serve under /api/v1
+# (Kong's default strip_path: true would forward "/" and 404 the backend).
+_format_version: "3.0"
+
+services:
+  - name: user-service
+    url: http://user-service:8081
+    routes:
+      # More-specific path than /api/v1/auth, so Kong matches it first: ONLY login gets
+      # the strict brute-force cap; register and the rest fall under the global 120/min.
+      - name: auth-login
+        paths:
+          - /api/v1/auth/login
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 5
+              policy: local
+              limit_by: ip
+      - name: auth
+        paths:
+          - /api/v1/auth
+        methods:
+          - POST
+        strip_path: false
+      - name: users
+        paths:
+          - /api/v1/users
+        methods:
+          - GET
+          - PUT
+        strip_path: false
+
+  - name: product-service
+    url: http://product-service:8082
+    routes:
+      # No route for /api/v1/inventory/* -> internal-only (isolation by omission -> 404).
+      - name: products
+        paths:
+          - /api/v1/products
+          - /api/v1/categories
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        strip_path: false
+
+  - name: cart-service
+    url: http://cart-service:8083
+    routes:
+      - name: cart
+        paths:
+          - /api/v1/cart
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        strip_path: false
+
+  - name: order-service
+    url: http://order-service:8084
+    routes:
+      - name: orders
+        paths:
+          - /api/v1/orders
+        methods:
+          - GET
+          - POST
+          - PATCH
+        strip_path: false
+
+  - name: payment-service
+    url: http://payment-service:8085
+    routes:
+      # The webhook lives UNDER the public /api/v1/payments prefix, so a plain prefix
+      # route would proxy it. This higher-specificity route matches first and terminates
+      # at the edge (404) — the sandbox webhook has no external caller this wave.
+      # methods are listed explicitly: in Kong's traditional router a route WITH methods
+      # outranks a methods-less one regardless of path length, so without these the broader
+      # `payments` route (GET, POST) would win and proxy the webhook. With methods present
+      # the longer path decides and this route wins (same mechanism that lets auth-login
+      # outrank auth). The list covers every method so the webhook is blocked for all of them.
+      # The path is a Kong regex (~ prefix) matching the `webhook` segment in ANY casing, so
+      # /api/v1/payments/WEBHOOK can't slip past a lowercase match and get proxied to Payment;
+      # the create route /api/v1/payments is unaffected.
+      - name: payments-webhook-block
+        paths:
+          - ~/api/v1/payments/[Ww][Ee][Bb][Hh][Oo][Oo][Kk]$
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+          - HEAD
+        strip_path: false
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+      - name: payments
+        paths:
+          - /api/v1/payments
+        methods:
+          - GET
+          - POST
+        strip_path: false
+
+# Global plugins (no service/route binding) — apply to every route unless a more
+# specific (route-scoped) plugin of the same name overrides them.
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 120
+      policy: local
+      limit_by: ip
+  - name: request-transformer
+    config:
+      remove:
+        headers:
+          - X-Consumer-ID
+          - X-Consumer-Custom-ID
+          - X-Consumer-Username
+          - X-Credential-Identifier
+          - X-Anonymous-Consumer
+          - X-User-Id
+          - X-User-Roles
+          - X-Authenticated-User
+  - name: cors
+    config:
+      # A CORS origin is NOT a secret. Set this per environment (one real frontend origin).
+      # Never '*' together with credentials: true (Kong won't send Allow-Credentials then).
+      origins:
+        - https://shop.example.com
+      credentials: true
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 5
+      size_unit: megabytes
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid
