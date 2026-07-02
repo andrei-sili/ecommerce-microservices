@@ -46,6 +46,8 @@ public class SecurityConfig {
                     .permitAll()
                     .requestMatchers(HttpMethod.GET, "/actuator/health/**", "/actuator/info")
                     .permitAll()
+                    .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                    .permitAll()
                     .anyRequest()
                     .authenticated())
         .exceptionHandling(
