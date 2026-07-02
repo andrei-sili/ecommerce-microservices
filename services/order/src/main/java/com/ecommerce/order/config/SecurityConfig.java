@@ -6,6 +6,7 @@ import com.ecommerce.order.security.RestAccessDeniedHandler;
 import com.ecommerce.order.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -36,6 +37,11 @@ public class SecurityConfig {
         .authorizeHttpRequests(
             auth ->
                 auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                    .permitAll()
+                    // Prometheus scrape is unauthenticated: the endpoint stays ClusterIP-internal,
+                    // off the Kong edge, and is never under /api/v1. Without this permit the
+                    // JWT-less scraper hits the terminal denyAll and gets 401.
+                    .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
                     .permitAll()
                     // Every order endpoint requires a valid JWT; ownership is enforced per request
                     // in the service layer (a user acts only on their own orders).
