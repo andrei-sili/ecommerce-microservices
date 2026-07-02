@@ -100,6 +100,65 @@ kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672        # RabbitMQ man
   `POST /api/v1/auth/login` over the global 120/min, trust-header strip, CORS, 5 MB size limit,
   `correlation-id`. Auth is Option A: Kong holds **no** `JWT_SECRET`; each service validates locally.
 
+## Observability (Wave 5c) — metrics + logs, ClusterIP-only
+
+Additive, Operator-based observability layered on the 5a/5b cluster as **separate apply
+steps** (not folded into `overlays/local`). Nothing is exposed north-south: Grafana and
+Prometheus are reached by `kubectl port-forward` only — **no Kong route, no second
+NodePort**. Metrics endpoints stay ClusterIP-internal and off `/api/v1`.
+
+- **Packaging = Option C (vendored `helm template`).** kube-prometheus-stack, Loki and
+  Alloy are rendered **once** from PINNED charts into committed `rendered.yaml` under
+  `base/observability/{metrics,logs}/`; bring-up is a plain `kubectl apply -k` with **no
+  runtime Helm**. `helm` is an **authoring-only** tool (install to `~/.local/bin`,
+  v3.21.x or v4.x) used solely by the `regen.sh` scripts on a chart bump — each bump is a
+  reviewable `rendered.yaml` diff. Pins: kube-prometheus-stack **87.5.1**,
+  grafana-community/loki **18.3.1**, grafana/alloy **1.10.0**.
+- **`--server-side` is MANDATORY for the metrics apply.** kube-prometheus-stack's
+  Prometheus/Alertmanager CRDs are ~0.6–0.8 MB each, far over the 262144-byte client-side
+  last-applied-annotation limit, so a plain `kubectl apply -k` fails "metadata.annotations:
+  Too long". `up.sh` uses `kubectl apply -k … --server-side --force-conflicts`.
+- **Metrics targets (8, each a ServiceMonitor, 30s):** 5 Spring `/actuator/prometheus`
+  (8081–8085), notification `/metrics` (8086), RabbitMQ `:15692/metrics`
+  (`rabbitmq_prometheus` plugin), Kong `:8100/metrics` (built-in prometheus plugin, scraped
+  via the **separate `kong-metrics` ClusterIP Service** — never a NodePort). The Prometheus
+  Operator selects our ServiceMonitors because `serviceMonitorSelectorNilUsesHelmValues:
+  false` (they carry no Helm release label). **The 5 Spring + notification targets stay
+  DOWN until the instrumented service images are built/merged** (Wave-5c per-service PRs).
+- **Logs (gated, skippable):** a monolithic single-binary **Loki** (filesystem, emptyDir,
+  memcached caches **OFF** — their defaults request ~9.8 GB and are otherwise
+  unschedulable) + an **Alloy** DaemonSet that tails `/var/log/pods` (CRI stage) and pushes
+  to `http://loki:3100`. Loki is added to Grafana as a datasource. `up.sh` applies logs
+  **after** metrics and auto-skips if `kubectl top nodes` shows the node ≥ 85 % memory;
+  force-skip with `SKIP_LOGS=1`. Logs are **disposable** (emptyDir → dropped on pod
+  restart), never presented as durable.
+- **Grafana admin, public-repo-safe:** `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` live
+  in the gitignored `secret.env` (placeholders in `secret.env.example`). They are delivered
+  through a **stable-named `grafana-admin` Secret** (`overlays/local` `secretGenerator`
+  with `disableNameSuffixHash: true`) that the vendored chart references by fixed name via
+  `existingSecret` — the hash-suffixed `ecommerce-secrets` name can't be followed by a
+  static rendered manifest. It is created by the `overlays/local` apply, before the metrics
+  apply, so the name resolves when Grafana starts. Anonymous viewer is **OFF**. (Note:
+  kustomize `secretGenerator` can't cherry-pick keys from an env file, so `grafana-admin`
+  mirrors `ecommerce-secrets`' contents — same namespace, same blast radius; Grafana
+  consumes only the `GRAFANA_ADMIN_*` keys via `secretKeyRef`, and no value is ever
+  committed.)
+- **Images** are pulled by kubelet from public registries at bring-up (NOT `k3d image
+  import`ed — import doubles host+node storage and **disk is the tight constraint**;
+  keep ~15 GB free). First observability bring-up needs internet for ~7 images (~1.3 GB).
+
+```bash
+# after `make -C infra k8s-up` (which applies both pillars):
+kubectl -n ecommerce port-forward svc/kube-prometheus-stack-grafana 3000:80   # Grafana  -> http://localhost:3000
+kubectl -n ecommerce port-forward svc/kps-prometheus 9090:9090                # Prometheus -> http://localhost:9090
+```
+
+Grafana dashboards (baked JSON ConfigMaps, `grafana_dashboard: "1"`, loaded by the sidecar
+— no runtime egress to grafana.com): Spring Boot HTTP (21308), Spring Boot 3 JVM (22108),
+FastAPI Observability (22676), RabbitMQ-Overview (10991), Kong (7424). Datasource uids are
+pinned to `prometheus`/`loki` by `dashboards/normalize.py`. Re-fetch/regenerate with
+`base/observability/*/regen.sh` (authoring-only; needs `helm`/`python3` + network).
+
 ## Secrets — nothing secret in git
 
 - Real values live in **`overlays/local/secret.env`**, which is **gitignored** (matches the root
@@ -159,10 +218,14 @@ make -C infra k8s-down      # or: bash infra/k8s/down.sh   (DATA LOSS)
 ## Validate manifests (no cluster)
 
 ```bash
-make -C infra k8s-validate  # kustomize build overlays/local | kubeconform -strict
+make -C infra k8s-validate  # kustomize build overlays/local + observability/{metrics,logs} | kubeconform -strict
 ```
 
-The same check runs in CI as the `validate-k8s` job (parallel to `validate-compose`).
+The same check runs in CI as the `validate-k8s` job (parallel to `validate-compose`). The
+observability kustomizations carry prometheus-operator CRs, so their validation adds the
+CRD schema catalog (`-schema-location …/datreeio/CRDs-catalog/…`) plus
+`-ignore-missing-schemas` (which skips only the vendored upstream CRD objects — every CR
+is still strictly validated).
 
 ## Layout
 
@@ -173,13 +236,25 @@ infra/k8s/
     {user,product,cart,order,payment,notification}/{deployment,service.yaml}
     databases/<svc>-db.yaml                # StatefulSet + headless Service ×6
     rabbitmq/rabbitmq.yaml                 # Deployment + PVC + Service
-    kong/{deployment,service}.yaml         # DB-less edge + NodePort 30080
-    kong/kong.yml                          # declarative config -> hashed ConfigMap (generated in base)
+    kong/{deployment,service}.yaml         # DB-less edge + NodePort 30080 + kong-metrics ClusterIP :8100
+    kong/kong.yml                          # declarative config (+ prometheus plugin) -> hashed ConfigMap
     kustomization.yaml                     # + configMapGenerator(kong-config)
+    observability/                         # Wave 5c (Option C: vendored `helm template`)
+      metrics/                             # kube-prometheus-stack 87.5.1
+        regen.sh values-metrics.yaml rendered.yaml kustomization.yaml
+        servicemonitors/*.yaml             # 8 ServiceMonitor CRs (5 spring + notification + rabbitmq + kong)
+        dashboards/                        # 5 baked JSON dashboards -> ConfigMaps (grafana_dashboard: "1")
+      logs/                                # grafana-community/loki 18.3.1 + grafana/alloy 1.10.0
+        regen.sh values-loki.yaml values-alloy.yaml rendered.yaml kustomization.yaml
   overlays/
     local/
-      kustomization.yaml                   # configMapGenerator + secretGenerator, namespace
+      kustomization.yaml                   # configMapGenerator + secretGenerator (+ grafana-admin), namespace
       secret.env.example                   # committed placeholders (real secret.env is gitignored)
     prod/.gitkeep                          # empty stub for a later wave
   up.sh  down.sh  README.md
 ```
+
+> The `observability/{metrics,logs}` kustomizations are applied as SEPARATE
+> `kubectl apply -k … --server-side` steps by `up.sh` — they are NOT referenced by
+> `base/kustomization.yaml` or the local overlay (that keeps the core app apply unchanged
+> and lets the logs pillar be skipped independently).
