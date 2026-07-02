@@ -81,3 +81,18 @@ secretGenerator:
   - name: ecommerce-secrets
     envs:
       - secret.env
+  # Wave 5c: a STABLE-named Secret for Grafana's admin identity. The vendored
+  # kube-prometheus-stack manifest (base/observability/metrics/rendered.yaml) references
+  # `grafana-admin` by FIXED name via existingSecret — it can't follow the hash suffix
+  # kustomize appends to `ecommerce-secrets`, so this one turns the suffix OFF. It is
+  # applied by `kubectl apply -k overlays/local` (up.sh step 6), BEFORE the separate
+  # metrics apply, so the name resolves when Grafana starts. Grafana consumes ONLY the
+  # GRAFANA_ADMIN_* keys via secretKeyRef; no value is ever committed (secret.env is
+  # gitignored). NOTE: kustomize secretGenerator cannot cherry-pick keys from an env
+  # file, so this Secret mirrors ecommerce-secrets' contents — same namespace, same
+  # blast radius (both fully decodable with secret-read RBAC), zero secret in git.
+  - name: grafana-admin
+    options:
+      disableNameSuffixHash: true
+    envs:
+      - secret.env
