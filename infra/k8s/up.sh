@@ -30,6 +30,17 @@ die() { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "missing '$1' on PATH. See infra/k8s/README.md for install."; }
 
+# Wait until a namespaced resource EXISTS (the operator creates the Prometheus
+# StatefulSet asynchronously after its CR is applied).
+wait_exists() {
+  local kind=$1 name=$2 tries=${3:-60}
+  for _ in $(seq 1 "$tries"); do
+    kubectl -n ecommerce get "$kind" "$name" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 # --- 0. tools ---------------------------------------------------------------
 need docker
 need k3d
@@ -107,6 +118,44 @@ kubectl -n ecommerce rollout status deploy/user-service deploy/product-service \
 log "waiting for the Kong edge"
 kubectl -n ecommerce rollout status deploy/kong --timeout=180s
 
+# --- 8. observability: metrics pillar (Wave 5c) -----------------------------
+# Applied as a SEPARATE step (NOT folded into overlays/local). --server-side is
+# MANDATORY: kube-prometheus-stack's Prometheus/Alertmanager CRDs exceed the 262144-byte
+# client-side annotation limit, so a plain `kubectl apply` fails "metadata.annotations:
+# Too long". Observability images are pulled by kubelet from public registries at
+# bring-up (NOT side-loaded — `k3d image import` doubles host+node storage and disk is
+# the tight constraint here); the first run needs internet for ~7 images (~1.3 GB).
+log "applying observability metrics (Prometheus Operator + Prometheus + Grafana)"
+kubectl apply -k "$SCRIPT_DIR/base/observability/metrics" --server-side --force-conflicts
+log "waiting for the metrics stack (operator, Prometheus, Grafana)"
+kubectl -n ecommerce rollout status deploy/kps-operator --timeout=300s
+wait_exists statefulset prometheus-kps-prometheus 90 \
+  || die "Prometheus Operator did not create statefulset/prometheus-kps-prometheus"
+kubectl -n ecommerce rollout status statefulset/prometheus-kps-prometheus --timeout=420s
+kubectl -n ecommerce rollout status deploy/kube-prometheus-stack-grafana --timeout=420s
+
+# --- 9. observability: logs pillar (Wave 5c; gated, independently skippable) -
+# Loki + Alloy stand apart from the metrics demo. Skip with SKIP_LOGS=1, or auto-skip if
+# the node is tight (best-effort `kubectl top nodes`; metrics-server may still be warming
+# up, in which case we proceed).
+if [ "${SKIP_LOGS:-0}" = "1" ]; then
+  log "SKIP_LOGS=1 -> skipping the logs pillar (Loki + Alloy)"
+else
+  logs_ok=1
+  if mempct=$(kubectl top nodes --no-headers 2>/dev/null | awk 'NR==1{gsub("%","",$5); print $5}'); then
+    if [ -n "$mempct" ] && [ "$mempct" -ge 85 ]; then
+      logs_ok=0
+      log "node memory at ${mempct}% -> SKIPPING logs to protect the metrics demo. Free headroom and apply manually: kubectl apply -k infra/k8s/base/observability/logs --server-side"
+    fi
+  fi
+  if [ "$logs_ok" = "1" ]; then
+    log "applying observability logs (monolithic Loki + Alloy DaemonSet)"
+    kubectl apply -k "$SCRIPT_DIR/base/observability/logs" --server-side
+    kubectl -n ecommerce rollout status statefulset/loki --timeout=420s
+    kubectl -n ecommerce rollout status daemonset/alloy --timeout=300s
+  fi
+fi
+
 log "pods:"
 kubectl get pods -n ecommerce -o wide
 
@@ -117,5 +166,13 @@ Stack is up. North-south goes through the single Kong edge on http://localhost:8
   curl http://localhost:8000/api/v1/products          # -> product-service via Kong
 The RabbitMQ management UI has no public route (internal only) — reach it with:
   kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672
+
+Observability (Wave 5c) is ClusterIP-only — NO Kong route, NO NodePort. Port-forward:
+  kubectl -n ecommerce port-forward svc/kube-prometheus-stack-grafana 3000:80   # Grafana -> http://localhost:3000
+  kubectl -n ecommerce port-forward svc/kps-prometheus 9090:9090                # Prometheus -> http://localhost:9090
+Grafana admin: user/password from the grafana-admin Secret (secret.env GRAFANA_ADMIN_*).
+  Prometheus -> Status -> Targets: 5 Spring /actuator/prometheus + notification /metrics +
+  rabbitmq :15692 + kong :8100 (the service targets stay DOWN until the instrumented
+  service images are built). Grafana dashboards: Spring HTTP/JVM, FastAPI, RabbitMQ, Kong.
 Teardown (DATA LOSS): infra/k8s/down.sh
 EOF
