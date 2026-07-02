@@ -117,7 +117,12 @@ NodePort**. Metrics endpoints stay ClusterIP-internal and off `/api/v1`.
 - **`--server-side` is MANDATORY for the metrics apply.** kube-prometheus-stack's
   Prometheus/Alertmanager CRDs are ~0.6–0.8 MB each, far over the 262144-byte client-side
   last-applied-annotation limit, so a plain `kubectl apply -k` fails "metadata.annotations:
-  Too long". `up.sh` uses `kubectl apply -k … --server-side --force-conflicts`.
+  Too long". `up.sh` uses `kubectl apply -k … --server-side --force-conflicts`. Because the
+  chart ships its CRDs **and** their CRs (Prometheus, ServiceMonitor) in one kustomization,
+  `up.sh` applies it **twice** with a `kubectl wait --for=condition=established` on the CRDs
+  in between: a single apply races (the CRs are rejected "no matches for kind" before the
+  freshly-applied CRDs register, so the operator + Grafana land but the Prometheus CR + the
+  8 ServiceMonitors silently don't). Both passes are idempotent.
 - **Metrics targets (8, each a ServiceMonitor, 30s):** 5 Spring `/actuator/prometheus`
   (8081–8085), notification `/metrics` (8086), RabbitMQ `:15692/metrics`
   (`rabbitmq_prometheus` plugin), Kong `:8100/metrics` (built-in prometheus plugin, scraped

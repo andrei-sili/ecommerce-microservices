@@ -126,6 +126,18 @@ kubectl -n ecommerce rollout status deploy/kong --timeout=180s
 # bring-up (NOT side-loaded — `k3d image import` doubles host+node storage and disk is
 # the tight constraint here); the first run needs internet for ~7 images (~1.3 GB).
 log "applying observability metrics (Prometheus Operator + Prometheus + Grafana)"
+# kube-prometheus-stack ships its CRDs AND CRs (Prometheus, ServiceMonitor) in ONE
+# kustomization, so a single apply RACES: the CRs are rejected with "no matches for kind
+# ServiceMonitor" because the just-applied CRDs aren't yet established in discovery — the
+# operator + Grafana land but the Prometheus CR + ServiceMonitors silently don't. Fix:
+# apply once (CRDs + workloads land; CRs may be rejected -> tolerate), WAIT for the CRDs
+# to establish, then apply again so the CRs register. Both passes are idempotent; the
+# second one is the real gate (no `|| true`).
+kubectl apply -k "$SCRIPT_DIR/base/observability/metrics" --server-side --force-conflicts || true
+kubectl wait --for=condition=established --timeout=120s \
+  crd/prometheuses.monitoring.coreos.com \
+  crd/servicemonitors.monitoring.coreos.com \
+  crd/prometheusrules.monitoring.coreos.com
 kubectl apply -k "$SCRIPT_DIR/base/observability/metrics" --server-side --force-conflicts
 log "waiting for the metrics stack (operator, Prometheus, Grafana)"
 kubectl -n ecommerce rollout status deploy/kps-operator --timeout=300s
