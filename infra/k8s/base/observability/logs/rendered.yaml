@@ -1,0 +1,854 @@
+---
+# Source: loki/templates/memcached/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: loki-memcached
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+    app.kubernetes.io/component: memcached
+automountServiceAccountToken: false
+---
+# Source: loki/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: loki
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+automountServiceAccountToken: true
+---
+# Source: loki/templates/config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+data:
+  config.yaml: |
+    
+    analytics:
+      reporting_enabled: false
+    auth_enabled: false
+    bloom_build:
+      builder:
+        planner_address: ""
+      enabled: false
+    bloom_gateway:
+      client:
+        addresses: ""
+      enabled: false
+    common:
+      compactor_grpc_address: 'loki.ecommerce.svc.cluster.local:9095'
+      path_prefix: /var/loki
+      replication_factor: 1
+      storage:
+        filesystem:
+          chunks_directory: /var/loki/chunks
+          rules_directory: /var/loki/rules
+    frontend:
+      scheduler_address: ""
+      tail_proxy_url: ""
+    frontend_worker:
+      scheduler_address: ""
+    index_gateway:
+      mode: simple
+    ingester:
+      wal:
+        flush_on_shutdown: true
+    limits_config:
+      allow_structured_metadata: true
+      max_cache_freshness_per_query: 10m
+      query_timeout: 300s
+      reject_old_samples: false
+      reject_old_samples_max_age: 168h
+      retention_period: 24h
+      split_queries_by_interval: 15m
+      volume_enabled: true
+    memberlist:
+      abort_if_cluster_join_fails: true
+      advertise_port: 7946
+      bind_port: 7946
+      join_members:
+      - loki-memberlist.ecommerce.svc.cluster.local
+      max_join_backoff: 1m
+      max_join_retries: 10
+      min_join_backoff: 1s
+      rejoin_interval: 90s
+    pattern_ingester:
+      enabled: false
+    query_range:
+      align_queries_with_step: true
+    ruler:
+      storage:
+        type: local
+      wal:
+        dir: /var/loki/ruler-wal
+    runtime_config:
+      file: /etc/loki/runtime-config/runtime-config.yaml
+    schema_config:
+      configs:
+      - from: "2024-04-01"
+        index:
+          period: 24h
+          prefix: index_
+        object_store: filesystem
+        schema: v13
+        store: tsdb
+    server:
+      graceful_shutdown_timeout: 5s
+      grpc_listen_port: 9095
+      grpc_server_max_concurrent_streams: 1000
+      grpc_server_max_recv_msg_size: 104857600
+      grpc_server_max_send_msg_size: 104857600
+      grpc_server_min_time_between_pings: 10s
+      grpc_server_ping_without_stream_allowed: true
+      http_listen_port: 3100
+      http_server_idle_timeout: 30s
+      http_server_read_timeout: 10m0s
+      http_server_write_timeout: 10m0s
+      log_level: info
+    storage_config:
+      bloom_shipper:
+        working_directory: /var/loki/data/bloomshipper
+      boltdb_shipper:
+        index_gateway_client:
+          server_address: ""
+      hedging:
+        at: 250ms
+        max_per_second: 20
+        up_to: 3
+      tsdb_shipper:
+        index_gateway_client:
+          server_address: ""
+      use_thanos_objstore: false
+    tracing:
+      enabled: false
+---
+# Source: loki/templates/runtime-configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-runtime
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+data:
+  runtime-config.yaml: |
+    {}
+---
+# Source: loki/templates/backend/clusterrole.yaml
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+  name: loki-clusterrole
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "watch", "list"]
+---
+# Source: loki/templates/backend/clusterrolebinding.yaml
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: loki-clusterrolebinding
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+subjects:
+  - kind: ServiceAccount
+    name: loki
+    namespace: ecommerce
+roleRef:
+  kind: ClusterRole
+  name: loki-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+---
+# Source: loki/templates/monolithic/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: "loki"
+  namespace: "ecommerce"
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+    app.kubernetes.io/component: "single-binary"
+  annotations:
+spec:
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  ports:
+    - name: http-metrics
+      port: 3100
+      targetPort: http-metrics
+      protocol: TCP
+    - name: grpc
+      port: 9095
+      targetPort: grpc
+      protocol: TCP
+    - name: grpclb
+      port: 9096
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/component: "single-binary"
+---
+# Source: loki/templates/monolithic/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: "loki-headless"
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+    app.kubernetes.io/component: "single-binary"
+    prometheus.io/service-monitor: "false"
+    variant: headless
+  annotations:
+spec:
+  clusterIP: None
+  type: ClusterIP
+  publishNotReadyAddresses: true
+  ports:
+    - name: http-metrics
+      port: 3100
+      targetPort: http-metrics
+      protocol: TCP
+    - name: grpc
+      port: 9095
+      targetPort: grpc
+      protocol: TCP
+    - name: grpclb
+      port: 9096
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/component: "single-binary"
+---
+# Source: loki/templates/service-memberlist.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki-memberlist
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+  annotations:
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: tcp
+      port: 7946
+      targetPort: http-memberlist
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/part-of: memberlist
+---
+# Source: loki/templates/monolithic/workload.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: "loki"
+  namespace: "ecommerce"
+  labels:
+    helm.sh/chart: loki-18.3.1
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/instance: loki
+    app.kubernetes.io/version: "3.7.3"
+    app.kubernetes.io/component: single-binary
+spec:
+  replicas: 1
+  podManagementPolicy: Parallel
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+  serviceName: loki-headless
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/instance: loki
+      app.kubernetes.io/component: single-binary
+  template:
+    metadata:
+      annotations:
+        checksum/config: 406ed3803559eac6c6e88076e42def064a1e2f1affe0c16b0efe547aaff5ad2d
+        kubectl.kubernetes.io/default-container: "loki"
+      labels:
+        helm.sh/chart: loki-18.3.1
+        app.kubernetes.io/name: loki
+        app.kubernetes.io/instance: loki
+        app.kubernetes.io/version: "3.7.3"
+        app.kubernetes.io/component: single-binary
+        app.kubernetes.io/part-of: memberlist
+    spec:
+      serviceAccountName: loki
+      enableServiceLinks: true
+      automountServiceAccountToken: true
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        runAsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app.kubernetes.io/component: single-binary
+                app.kubernetes.io/instance: 'loki'
+                app.kubernetes.io/name: 'loki'
+            topologyKey: kubernetes.io/hostname
+      volumes:
+        - name: temp
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: loki
+            items:
+              - key: "config.yaml"
+                path: "config.yaml"
+        - name: runtime-config
+          configMap:
+            name: loki-runtime
+        - name: storage
+          emptyDir: {}
+        - name: sc-rules-volume
+          emptyDir: {}
+        - name: sc-rules-temp
+          emptyDir: {}
+      containers:
+        - name: loki
+          image: docker.io/grafana/loki:3.7.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - -config.file=/etc/loki/config/config.yaml
+            - -config.expand-env=true
+            - -memberlist.advertise-addr=$(POD_IP)
+            - -target=all
+          ports:
+            - name: http-metrics
+              containerPort: 3100
+              protocol: TCP
+            - name: grpc
+              containerPort: 9095
+              protocol: TCP
+            - name: http-memberlist
+              containerPort: 7946
+              protocol: TCP
+          env:
+            - name: GOMEMLIMIT
+              value: 435MiB
+            - name: GOGC
+              value: "80"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            failureThreshold: 10
+            httpGet:
+              path: /loki/api/v1/status/buildinfo
+              port: http-metrics
+            periodSeconds: 30
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ready
+              port: http-metrics
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          volumeMounts:
+            - name: config
+              mountPath: /etc/loki/config
+            - name: runtime-config
+              mountPath: /etc/loki/runtime-config
+            - name: storage
+              mountPath: /var/loki
+            - name: temp
+              mountPath: /tmp
+            - name: sc-rules-volume
+              mountPath: "/rules"
+          resources:
+            limits:
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+        - name: loki-sc-rules
+          image: docker.io/kiwigrid/k8s-sidecar:2.8.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http-sidecar
+              containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+                failureThreshold: 3
+                httpGet:
+                  path: /healthz
+                  port: http-sidecar
+                initialDelaySeconds: 30
+                periodSeconds: 30
+                successThreshold: 1
+                timeoutSeconds: 1
+          readinessProbe:
+                failureThreshold: 3
+                httpGet:
+                  path: /healthz
+                  port: http-sidecar
+                initialDelaySeconds: 3
+                periodSeconds: 10
+                successThreshold: 1
+                timeoutSeconds: 1
+          env:
+            - name: METHOD
+              value: WATCH
+            - name: LABEL
+              value: "loki_rule"
+            - name: FOLDER
+              value: "/rules"
+            - name: RESOURCE
+              value: "both"
+            - name: WATCH_SERVER_TIMEOUT
+              value: "60"
+            - name: WATCH_CLIENT_TIMEOUT
+              value: "60"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: HEALTH_PORT
+              value: "8080"
+          volumeMounts:
+            - name: sc-rules-temp
+              mountPath: /tmp
+            - name: sc-rules-volume
+              mountPath: "/rules"
+---
+---
+# Source: alloy/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: true
+metadata:
+  name: alloy
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/component: rbac
+---
+# Source: alloy/templates/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/component: config
+data:
+  config.alloy: |-
+    // Discover every pod on THIS node (the DaemonSet field selector is applied by the
+    // chart via HOSTNAME); build Loki labels + the /var/log/pods file path from pod meta.
+    discovery.kubernetes "pods" {
+      role = "pod"
+    }
+    
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+    
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        action        = "replace"
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        action        = "replace"
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        action        = "replace"
+        target_label  = "container"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        action        = "replace"
+        target_label  = "app"
+      }
+      // /var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log — the leading '*'
+      // absorbs the "<namespace>_<pod>_" prefix, so uid/container is enough.
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        action        = "replace"
+        separator     = "/"
+        replacement   = "/var/log/pods/*$1/*.log"
+        target_label  = "__path__"
+      }
+    }
+    
+    local.file_match "pod_logs" {
+      path_targets = discovery.relabel.pod_logs.output
+    }
+    
+    loki.source.file "pod_logs" {
+      targets    = local.file_match.pod_logs.targets
+      forward_to = [loki.process.pod_logs.receiver]
+    }
+    
+    // CRI (containerd/k3d) log line format: strip the timestamp/stream prefix.
+    loki.process "pod_logs" {
+      stage.cri {}
+      forward_to = [loki.write.default.receiver]
+    }
+    
+    loki.write "default" {
+      endpoint {
+        // gateway is disabled => the monolithic Service is named `loki`.
+        url = "http://loki:3100/loki/api/v1/push"
+      }
+    }
+---
+# Source: alloy/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: alloy
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/component: rbac
+rules:
+  - apiGroups:
+    - ""
+    - discovery.k8s.io
+    - networking.k8s.io
+    resources:
+    - endpoints
+    - endpointslices
+    - ingresses
+    - pods
+    - services
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - pods
+    - pods/log
+    - namespaces
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - monitoring.grafana.com
+    resources:
+    - podlogs
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - monitoring.coreos.com
+    resources:
+    - prometheusrules
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - monitoring.coreos.com
+    resources:
+    - alertmanagerconfigs
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - monitoring.coreos.com
+    resources:
+    - podmonitors
+    - servicemonitors
+    - probes
+    - scrapeconfigs
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - events
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - configmaps
+    - secrets
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - apps
+    - extensions
+    resources:
+    - replicasets
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - nodes
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - nodes/pods
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ""
+    resources:
+    - nodes/metrics
+    verbs:
+    - get
+    - list
+    - watch
+  - nonResourceURLs:
+    - /metrics
+    verbs:
+    - get
+---
+# Source: alloy/templates/rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: alloy
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: alloy
+subjects:
+  - kind: ServiceAccount
+    name: alloy
+    namespace: ecommerce
+---
+# Source: alloy/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+    app.kubernetes.io/component: networking
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+  internalTrafficPolicy: Cluster
+  ports:
+    - name: http-metrics
+      port: 12345
+      targetPort: 12345
+      protocol: "TCP"
+---
+# Source: alloy/templates/controllers/daemonset.yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: alloy
+  namespace: ecommerce
+  labels:
+    helm.sh/chart: alloy-1.10.0
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/instance: alloy
+    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/part-of: alloy
+spec:
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: alloy
+      labels:
+        app.kubernetes.io/name: alloy
+        app.kubernetes.io/instance: alloy
+    spec:
+      serviceAccountName: alloy
+      containers:
+        - name: alloy
+          image: docker.io/grafana/alloy:v1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.alloy
+            - --storage.path=/tmp/alloy
+            - --server.http.listen-addr=0.0.0.0:12345
+            - --server.http.ui-path-prefix=/
+            - --stability.level=generally-available
+          env:
+            - name: ALLOY_DEPLOY_MODE
+              value: "helm"
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          ports:
+            - containerPort: 12345
+              name: http-metrics
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 12345
+              scheme: HTTP
+            initialDelaySeconds: 10
+            timeoutSeconds: 1
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+            - name: varlog
+              mountPath: /var/log
+              readOnly: true
+        - name: config-reloader
+          image: quay.io/prometheus-operator/prometheus-config-reloader:v0.91.0@sha256:7d9e4eea5f1139e602508871f422b0116c60e87c662f3dcd234d5ab60cd0d8c1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --watched-dir=/etc/alloy
+            - --reload-url=http://localhost:12345/-/reload
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+          resources:
+            requests:
+              cpu: 10m
+              memory: 50Mi
+      dnsPolicy: ClusterFirst
+      volumes:
+        - name: config
+          configMap:
+            name: alloy
+        - name: varlog
+          hostPath:
+            path: /var/log

@@ -1,0 +1,21 @@
+# Notification (FastAPI) exposes prometheus-fastapi-instrumentator at /metrics on 8086
+# (port named `http`). Off the Kong edge, ClusterIP-internal like the Spring services.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: notification-service
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/part-of: ecommerce
+spec:
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: notification-service
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scheme: http

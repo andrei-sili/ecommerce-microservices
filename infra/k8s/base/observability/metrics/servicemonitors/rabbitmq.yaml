@@ -1,0 +1,22 @@
+# RabbitMQ's built-in rabbitmq_prometheus plugin serves aggregated metrics on :15692
+# (port named `prometheus` on the rabbitmq Service — added in base/rabbitmq/rabbitmq.yaml).
+# The plugin is enabled via the mounted enabled_plugins file. Dashboard 10991.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: rabbitmq
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/part-of: ecommerce
+spec:
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rabbitmq
+  endpoints:
+    - port: prometheus
+      path: /metrics
+      interval: 30s
+      scheme: http

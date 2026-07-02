@@ -18,3 +18,24 @@ spec:
       port: 8000
       targetPort: proxy
       nodePort: 30080
+---
+# Wave 5c: a SEPARATE ClusterIP Service for Kong's Status API (:8100), scraped in-cluster
+# by Prometheus via the kong-metrics ServiceMonitor. This is deliberately NOT a port on
+# the NodePort Service above: a NodePort Service auto-allocates a nodePort for EVERY port,
+# which would expose the unauthenticated status/metrics endpoint externally and break the
+# "only one NodePort in the namespace" invariant. ClusterIP keeps :8100 internal-only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-metrics
+  labels:
+    app.kubernetes.io/name: kong
+    app.kubernetes.io/component: gateway-metrics
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kong
+  ports:
+    - name: metrics
+      port: 8100
+      targetPort: status

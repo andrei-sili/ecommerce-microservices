@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Baked Grafana dashboards as ConfigMaps. The kube-prometheus-stack Grafana sidecar
+# watches for ConfigMaps labelled `grafana_dashboard: "1"` in ALL namespaces and loads
+# any `.json` data key as a dashboard — no runtime egress to grafana.com. Datasource
+# uids are pinned to `prometheus`/`loki` by dashboards/normalize.py (see regen.sh).
+namespace: ecommerce
+
+# disableNameSuffixHash: stable, readable ConfigMap names (the sidecar reloads on any
+# change by watching the label, so a content hash isn't needed to trigger a reload).
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+
+configMapGenerator:
+  - name: dashboard-spring-boot-http
+    files:
+      - spring-boot-http.json
+  - name: dashboard-spring-boot-jvm
+    files:
+      - spring-boot-jvm.json
+  - name: dashboard-fastapi-observability
+    files:
+      - fastapi-observability.json
+  - name: dashboard-rabbitmq-overview
+    files:
+      - rabbitmq-overview.json
+  - name: dashboard-kong
+    files:
+      - kong.json

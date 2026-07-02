@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Wave 5c logs pillar (Option C — vendored `helm template`). SEPARATE, gated component:
+# applied AFTER metrics (see up.sh), only when `kubectl top nodes` shows headroom. The
+# metrics demo stands alone without this; deferring it never breaks metrics.
+#
+# rendered.yaml is the committed output of regen.sh (grafana-community/loki 18.3.1 +
+# grafana/alloy 1.10.0): a monolithic single-binary Loki (filesystem, emptyDir, caches
+# OFF) + an Alloy DaemonSet that tails /var/log/pods and pushes to http://loki:3100.
+# Do NOT hand-edit rendered.yaml — change the values-*.yaml and re-run regen.sh.
+#
+# Applied with `kubectl apply -k ... --server-side` (up.sh). Namespaces are baked in
+# (helm template -n ecommerce); the alloy/loki ClusterRoles stay cluster-scoped — so
+# this kustomization sets NO `namespace:`. Loki is added to Grafana as a datasource in
+# values-metrics.yaml (http://loki:3100); logs are disposable (emptyDir), never durable.
+
+resources:
+  - rendered.yaml

@@ -181,3 +181,14 @@ plugins:
     config:
       header_name: X-Request-Id
       generator: uuid
+  # Wave 5c: expose Kong metrics on the Status API (:8100/metrics). Both status_code +
+  # latency metrics are opt-in in Kong 3.x (off => empty panels). upstream_health_metrics
+  # is off because 5b deleted the `upstreams` block (the metric family would be empty and
+  # misleading); per_consumer is off (Option-A Kong has no consumers). Scraped in-cluster
+  # via the separate kong-metrics ClusterIP Service — :8100 is NEVER a NodePort.
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      upstream_health_metrics: false
+      per_consumer: false
