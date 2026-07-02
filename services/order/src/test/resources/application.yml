@@ -34,6 +34,14 @@ spring:
 server:
   port: 0
 
+# Mirrors production exposure so the Prometheus scrape endpoint is exercised through the real
+# security chain in PrometheusMetricsIntegrationTest (the test application.yml fully shadows main).
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
 security:
   jwt:
     secret: test-secret-that-is-long-enough-for-hs256-1234567890
