@@ -38,6 +38,10 @@ public class SecurityConfig {
             auth ->
                 auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
                     .permitAll()
+                    // Prometheus scrape endpoint: unauthenticated, ClusterIP-internal, off the Kong
+                    // edge and not under /api/v1 (Wave 5c observability).
+                    .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                    .permitAll()
                     // Webhook uses HMAC-SHA256 signature, not JWT — permit before auth filter.
                     .requestMatchers(HttpMethod.POST, "/api/v1/payments/webhook")
                     .permitAll()
