@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir --upgrade pip \
         alembic \
         pydantic \
         pydantic-settings \
-        aio-pika
+        aio-pika \
+        prometheus-fastapi-instrumentator==8.0.2
 
 # ---------- runtime stage ----------
 FROM python:3.12-slim AS runtime
