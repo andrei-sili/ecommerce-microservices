@@ -1,0 +1,80 @@
+# Slim monolithic Loki for the local k3d logs pillar (Wave 5c, Option C). Rendered ONCE
+# by regen.sh into rendered.yaml. Secret-free: monolithic + filesystem + auth_enabled
+# false needs no credentials, so nothing here trips gitleaks. Disposable demo storage.
+
+deploymentMode: Monolithic
+
+loki:
+  # No multi-tenancy: single-org local demo. Default true would 401 with "no org id".
+  auth_enabled: false
+  commonConfig:
+    # Single replica (default 3 assumes an HA ring).
+    replication_factor: 1
+  storage:
+    # Local filesystem, no object store (Monolithic is the only mode that allows this).
+    type: filesystem
+  # Required for Loki 3.x: a tsdb/v13 schema (default schemaConfig is empty → chart errors).
+  schemaConfig:
+    configs:
+      - from: "2024-04-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  # Trim ingestion guardrails for a tiny demo (avoid per-stream rate/lag rejects).
+  limits_config:
+    retention_period: 24h
+    reject_old_samples: false
+    allow_structured_metadata: true
+  # k3d/containerd analytics off.
+  analytics:
+    reporting_enabled: false
+
+# The single Loki pod. persistence off => emptyDir (logs are disposable, drop on restart).
+singleBinary:
+  replicas: 1
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# --- The critical footguns: the memcached caches default ON and REQUEST ~9.8Gi
+# (chunksCache) + ~1.2Gi (resultsCache) => the pods are UNSCHEDULABLE on this node.
+# Both OFF for a demo. ---
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# --- Everything else off: single-node, no gateway/canary/test/object-store, and no
+# self-monitoring (the 18.x key is monitoring.serviceMonitor/dashboards/rules; the old
+# monitoring.selfMonitoring was removed). ---
+gateway:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+minio:
+  enabled: false
+monitoring:
+  serviceMonitor:
+    enabled: false
+  dashboards:
+    enabled: false
+  rules:
+    enabled: false
+
+# Not used in Monolithic mode; pin replicas to 0 so nothing extra schedules.
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0

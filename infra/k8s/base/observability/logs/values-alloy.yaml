@@ -1,0 +1,93 @@
+# Grafana Alloy DaemonSet (Wave 5c) — tails pod logs from /var/log/pods and pushes to
+# the monolithic Loki. Rendered ONCE by regen.sh. Alloy replaces Promtail (EOL 2026-03).
+
+controller:
+  type: daemonset
+
+alloy:
+  # Mount the host /var/log so the file-based tailer can read /var/log/pods/*.
+  mounts:
+    varlog: true
+  # Single-node local demo: no clustering.
+  clustering:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  configMap:
+    create: true
+    content: |-
+      // Discover every pod on THIS node (the DaemonSet field selector is applied by the
+      // chart via HOSTNAME); build Loki labels + the /var/log/pods file path from pod meta.
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          action        = "replace"
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          action        = "replace"
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          action        = "replace"
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          action        = "replace"
+          target_label  = "app"
+        }
+        // /var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log — the leading '*'
+        // absorbs the "<namespace>_<pod>_" prefix, so uid/container is enough.
+        rule {
+          source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+          action        = "replace"
+          separator     = "/"
+          replacement   = "/var/log/pods/*$1/*.log"
+          target_label  = "__path__"
+        }
+      }
+
+      local.file_match "pod_logs" {
+        path_targets = discovery.relabel.pod_logs.output
+      }
+
+      loki.source.file "pod_logs" {
+        targets    = local.file_match.pod_logs.targets
+        forward_to = [loki.process.pod_logs.receiver]
+      }
+
+      // CRI (containerd/k3d) log line format: strip the timestamp/stream prefix.
+      loki.process "pod_logs" {
+        stage.cri {}
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          // gateway is disabled => the monolithic Service is named `loki`.
+          url = "http://loki:3100/loki/api/v1/push"
+        }
+      }
+
+# Pod list/watch for discovery.kubernetes(role: pod).
+rbac:
+  create: true
+serviceAccount:
+  create: true
+
+# No Alloy self-scrape ServiceMonitor (keep it slim).
+serviceMonitor:
+  enabled: false
