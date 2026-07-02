@@ -15,6 +15,11 @@ k8s-down:
 
 # Render + schema-validate the manifests (no cluster needed). Mirrors the CI gate.
 # Uses a throwaway secret.env (placeholders) if none exists so the generator can build.
+# The Wave-5c observability kustomizations carry prometheus-operator CRs, so they need
+# the CRD schema catalog (+ -ignore-missing-schemas for the vendored upstream CRDs).
+OBS_CRD := https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
 k8s-validate:
 	@test -f $(OVERLAY)/secret.env || cp $(OVERLAY)/secret.env.example $(OVERLAY)/secret.env
 	kustomize build $(OVERLAY) | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default
+	kustomize build $(K8S_DIR)/base/observability/metrics | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default -schema-location '$(OBS_CRD)' -ignore-missing-schemas
+	kustomize build $(K8S_DIR)/base/observability/logs | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default -schema-location '$(OBS_CRD)' -ignore-missing-schemas
