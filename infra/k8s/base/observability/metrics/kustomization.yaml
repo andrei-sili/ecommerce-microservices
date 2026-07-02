@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Wave 5c metrics pillar (Option C — vendored `helm template`). Applied as a SEPARATE
+# step AFTER overlays/local (see up.sh), with `kubectl apply --server-side
+# --force-conflicts`: the Prometheus/Alertmanager CRDs in rendered.yaml exceed the
+# 262144-byte client-side annotation limit, so a plain client-side apply fails.
+#
+# rendered.yaml is the committed output of regen.sh (kube-prometheus-stack 87.5.1,
+# --include-crds): operator + Prometheus + Grafana + kube-state-metrics + node-exporter
+# + all CRDs. Do NOT hand-edit rendered.yaml — change values-metrics.yaml and re-run
+# regen.sh so every bump is a reviewable diff.
+#
+# Namespaces are already baked in (helm template -n ecommerce) for namespaced resources;
+# CRDs/ClusterRoles stay cluster-scoped — so this kustomization deliberately sets NO
+# `namespace:` (that would try to namespace cluster-scoped objects). The hand-written
+# ServiceMonitors and dashboards carry their own `namespace: ecommerce`.
+
+resources:
+  - rendered.yaml
+  - servicemonitors/spring-services.yaml
+  - servicemonitors/notification.yaml
+  - servicemonitors/rabbitmq.yaml
+  - servicemonitors/kong.yaml
+  - dashboards

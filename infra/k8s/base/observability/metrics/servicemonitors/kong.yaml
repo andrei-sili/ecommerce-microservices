@@ -1,0 +1,24 @@
+# Kong's built-in prometheus plugin (enabled in base/kong/kong.yml) serves metrics on the
+# Status API :8100/metrics. Scraped via the SEPARATE kong-metrics ClusterIP Service
+# (component=gateway-metrics) so :8100 is never exposed as a NodePort — see the
+# kong-metrics Service in base/kong/service.yaml. Dashboard 7424.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kong-metrics
+  namespace: ecommerce
+  labels:
+    app.kubernetes.io/part-of: ecommerce
+spec:
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kong
+      app.kubernetes.io/component: gateway-metrics
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scheme: http
