@@ -155,7 +155,11 @@ if [ "${SKIP_LOGS:-0}" = "1" ]; then
 else
   logs_ok=1
   if mempct=$(kubectl top nodes --no-headers 2>/dev/null | awk 'NR==1{gsub("%","",$5); print $5}'); then
-    if [ -n "$mempct" ] && [ "$mempct" -ge 85 ]; then
+    # metrics-server may report "<unknown>" while warming up — treat any non-numeric
+    # value as 0 so the gate fails open SILENTLY and intentionally (no "integer
+    # expression expected" noise from the -ge test).
+    case "$mempct" in ''|*[!0-9]*) mempct=0;; esac
+    if [ "$mempct" -ge 85 ]; then
       logs_ok=0
       log "node memory at ${mempct}% -> SKIPPING logs to protect the metrics demo. Free headroom and apply manually: kubectl apply -k infra/k8s/base/observability/logs --server-side"
     fi

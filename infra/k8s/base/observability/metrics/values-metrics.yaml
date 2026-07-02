@@ -84,8 +84,9 @@ grafana:
   grafana.ini:
     auth.anonymous:
       enabled: false
-  # ClusterIP; reached with `kubectl port-forward svc/kps-grafana 3000:80`. No Ingress,
-  # no Kong route, no second NodePort.
+  # ClusterIP; reached with `kubectl port-forward svc/kube-prometheus-stack-grafana 3000:80`
+  # (the Grafana subchart does NOT inherit fullnameOverride, so its Service keeps the
+  # release-prefixed name). No Ingress, no Kong route, no second NodePort.
   service:
     type: ClusterIP
   # Load any ConfigMap labelled grafana_dashboard: "1" from ALL namespaces (the baked
