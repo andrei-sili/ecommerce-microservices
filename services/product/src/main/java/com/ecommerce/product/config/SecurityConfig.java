@@ -60,6 +60,10 @@ public class SecurityConfig {
             auth ->
                 auth.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
                     .permitAll()
+                    // Prometheus scrape endpoint: unauthenticated on purpose but ClusterIP-internal
+                    // only (never routed through Kong, never under /api/v1). Wave 5c metrics.
+                    .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                    .permitAll()
                     // Internal reservation endpoints are gated by the X-Internal-Api-Key filter,
                     // not by JWT/ADMIN. Permit them here so the broad write rules below don't force
                     // ADMIN; the InternalApiKeyFilter (added before the JWT filter) is the gate.
