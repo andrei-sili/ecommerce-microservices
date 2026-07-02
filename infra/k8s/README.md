@@ -113,7 +113,10 @@ NodePort**. Metrics endpoints stay ClusterIP-internal and off `/api/v1`.
   runtime Helm**. `helm` is an **authoring-only** tool (install to `~/.local/bin`,
   v3.21.x or v4.x) used solely by the `regen.sh` scripts on a chart bump — each bump is a
   reviewable `rendered.yaml` diff. Pins: kube-prometheus-stack **87.5.1**,
-  grafana-community/loki **18.3.1**, grafana/alloy **1.10.0**.
+  grafana-community/loki **18.3.1**, grafana/alloy **1.10.0**. After a chart version bump,
+  delete the old admission-webhook certgen Jobs before re-applying (completed Jobs are
+  immutable → "field is immutable" on apply):
+  `kubectl -n ecommerce delete job kps-admission-create kps-admission-patch`.
 - **`--server-side` is MANDATORY for the metrics apply.** kube-prometheus-stack's
   Prometheus/Alertmanager CRDs are ~0.6–0.8 MB each, far over the 262144-byte client-side
   last-applied-annotation limit, so a plain `kubectl apply -k` fails "metadata.annotations:
@@ -147,7 +150,9 @@ NodePort**. Metrics endpoints stay ClusterIP-internal and off `/api/v1`.
   kustomize `secretGenerator` can't cherry-pick keys from an env file, so `grafana-admin`
   mirrors `ecommerce-secrets`' contents — same namespace, same blast radius; Grafana
   consumes only the `GRAFANA_ADMIN_*` keys via `secretKeyRef`, and no value is ever
-  committed.)
+  committed.) Because `grafana-admin` has **no content-hash suffix**, rotating the
+  password does NOT roll the Grafana pod — restart it manually:
+  `kubectl -n ecommerce rollout restart deploy/kube-prometheus-stack-grafana`.
 - **Images** are pulled by kubelet from public registries at bring-up (NOT `k3d image
   import`ed — import doubles host+node storage and **disk is the tight constraint**;
   keep ~15 GB free). First observability bring-up needs internet for ~7 images (~1.3 GB).
@@ -229,8 +234,8 @@ make -C infra k8s-validate  # kustomize build overlays/local + observability/{me
 The same check runs in CI as the `validate-k8s` job (parallel to `validate-compose`). The
 observability kustomizations carry prometheus-operator CRs, so their validation adds the
 CRD schema catalog (`-schema-location …/datreeio/CRDs-catalog/…`) plus
-`-ignore-missing-schemas` (which skips only the vendored upstream CRD objects — every CR
-is still strictly validated).
+`-skip CustomResourceDefinition` (which skips only the vendored upstream CRD objects —
+every CR stays strictly validated, and a typo'd apiVersion cannot slip through silently).
 
 ## Layout
 

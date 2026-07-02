@@ -131,8 +131,9 @@ jobs:
       # Wave 5c: the observability kustomizations (Option C — vendored `helm template`)
       # contain prometheus-operator CRs (ServiceMonitor/Prometheus/…). kubeconform needs
       # their schemas or it red-fails the CRs, so add the prometheus-operator CR schema
-      # catalog; -ignore-missing-schemas then skips ONLY the vendored upstream CRD objects
-      # (no published JSON schema) — every CR is still strictly validated.
+      # catalog; `-skip CustomResourceDefinition` then skips ONLY the vendored upstream
+      # CRD objects (no published JSON schema) — every CR stays strictly validated, and a
+      # future typo'd apiVersion cannot slip through silently (unlike -ignore-missing-schemas).
       - name: Validate observability manifests (metrics + logs)
         run: |
           set -euo pipefail
@@ -141,5 +142,5 @@ jobs:
             echo "== observability/$component =="
             kustomize build "infra/k8s/base/observability/$component" \
               | kubeconform -strict -summary -kubernetes-version 1.32.0 \
-                  -schema-location default -schema-location "$CRD" -ignore-missing-schemas
+                  -schema-location default -schema-location "$CRD" -skip CustomResourceDefinition
           done
