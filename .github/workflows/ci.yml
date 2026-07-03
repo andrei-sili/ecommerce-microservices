@@ -165,7 +165,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Fail on populated kind Secret in tracked infra YAML
         run: |
-          python3 -m pip install --quiet pyyaml
+          python3 -m pip install --quiet pyyaml==6.0.3 # pinned: sole third-party dep of a security gate
           python3 .github/scripts/check-committed-secrets.py
 
   # Wave 5d: report-only Trivy CVE scan (SARIF -> Security tab; exit-code 0 never
