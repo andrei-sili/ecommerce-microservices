@@ -1,0 +1,66 @@
+# Wave 5d: build and push the 6 service images to GHCR on every merge to main.
+# Separate workflow from ci.yml on purpose: the trigger differs (push to main only,
+# never on PRs) and packages:write stays out of the PR-triggered workflow entirely.
+# Every third-party action is pinned to a full commit SHA (2026-03 Trivy supply-chain
+# attack force-pushed 76/77 action tags); versions re-verified upstream on 2026-07-03.
+name: Push images
+
+on:
+  push:
+    branches: [main]
+
+# Least privilege at the workflow level; the job adds packages:write only.
+permissions:
+  contents: read
+
+# Queue (never cancel) superseded runs: a half-cancelled matrix would leave a commit
+# with SHA-tagged images for only some of the 6 services.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  push-images:
+    name: Push image (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [user, product, cart, order, payment, notification]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # Immutable git-SHA tag (rollback = point a Deployment at any prior SHA) plus a
+      # moving `main` tag. OCI labels (incl. org.opencontainers.image.source) link the
+      # GHCR package to this repo. github.repository = andrei-sili/ecommerce-microservices.
+      - name: Docker metadata (tags + OCI labels)
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}/${{ matrix.service }}-service
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+      # Built-in least-privilege token — no PAT, no new secret.
+      - name: Log in to GHCR
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Single-arch on purpose (runners + target machine are amd64; QEMU doubles build
+      # time for nothing). Per-service cache scope: six services thrash a shared 10 GB cache.
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: services/${{ matrix.service }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
