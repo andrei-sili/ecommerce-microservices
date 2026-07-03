@@ -7,8 +7,8 @@ application services, their 6 Postgres databases (database-per-service), RabbitM
 **Wave 5b (this doc):** Kong is the only host ingress, exposed as a `NodePort` on
 `http://localhost:8000`; **Consul is retired** — Kubernetes does discovery + health-gated routing
 natively (CoreDNS is the registry; kube-proxy + pod readiness are the router), so Kong's Wave-4
-active health checks were deleted. **Out of scope:** observability and a registry/GHCR come later
-(5c/5d). The committed `infra/docker-compose.yml` stays a still-working baseline (Consul removed
+active health checks were deleted. Observability landed in Wave 5c (below); the GHCR registry +
+CI/CD scanning landed in Wave 5d (below). The committed `infra/docker-compose.yml` stays a still-working baseline (Consul removed
 there too, but it keeps Kong's Docker-DNS upstreams + active checks); nothing here changes service code.
 
 K8s **Service names are identical to the Compose DNS names** (`user-service`, `product-service`,
@@ -237,6 +237,71 @@ CRD schema catalog (`-schema-location …/datreeio/CRDs-catalog/…`) plus
 `-skip CustomResourceDefinition` (which skips only the vendored upstream CRD objects —
 every CR stays strictly validated, and a typo'd apiVersion cannot slip through silently).
 
+## Registry & CI/CD (Wave 5d) — GHCR images + report-only scanning
+
+Every merge to `main` builds and pushes all 6 service images to GHCR
+(`.github/workflows/push-images.yml`, Buildx + per-service GHA cache, auth via the
+workflow's own `GITHUB_TOKEN` — no PAT, no new secret):
+
+- `ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service:sha-<longsha>` — immutable,
+  one per commit; what `overlays/prod` references. Rollback = point at any prior SHA.
+- `…:main` — moving branch tag, convenience only. Never referenced by a manifest.
+- OCI labels (`org.opencontainers.image.source`) link each package back to this repo.
+
+**One-time GitHub UI steps (repo owner):** set each of the 6 GHCR packages to **public**
+(new packages default to PRIVATE even in a public repo → kubelet can't pull) and turn
+**immutable packages/releases ON** (the control that saved trivy-action v0.35.0 in the
+2026-03 supply-chain attack). Add the new CI checks to branch protection only after
+their first green run.
+
+### Deploying a pushed image (prod overlay)
+
+`overlays/prod` maps every `ecommerce/<svc>-service:dev` to its GHCR image. The
+committed `newTag` is a syntactically-valid placeholder (nothing is pushed at PR time);
+pin the real commit at deploy time — full loop in `overlays/prod/README.md`:
+
+```bash
+cd infra/k8s/overlays/prod
+kustomize edit set image \
+  "ecommerce/user-service=ghcr.io/andrei-sili/ecommerce-microservices/user-service:sha-$(git rev-parse HEAD)"
+```
+
+Never a moving tag (`latest`/`dev`/`main`) in prod. With public GHCR packages the
+kubelet pulls without an imagePullSecret — which also permanently fixes the 5b gotcha
+where kubelet image-GC left `k3d image import`ed images `ImagePullBackOff` on
+scale-back (with a registry, kubelet just re-pulls).
+
+### Local `:dev` staleness gotcha (local flow unchanged)
+
+`overlays/local` keeps `ecommerce/<svc>-service:dev` + `k3d image import` — no registry
+round-trip. But **re-importing the same `:dev` tag does NOT restart pods**: with
+`imagePullPolicy: IfNotPresent` the node keeps serving the previously-cached image, so
+you "redeploy" and silently run OLD code. After every re-import run
+`kubectl -n ecommerce rollout restart deploy/<svc>-service` (the smoke flow already
+does) — or use per-build tags.
+
+### CI security posture (Wave 5d)
+
+- **Every third-party action is pinned to a full commit SHA** (version as a trailing
+  comment) — the 2026-03 Trivy supply-chain attack force-pushed 76/77 of trivy-action's
+  tags. Re-verify versions upstream before re-pinning forward, and pin only immutable
+  releases.
+- **Trivy is report-only for now** (SARIF → GitHub Security tab, `exit-code: 0`; a
+  blocking gate is a later slice, once the baseline is clean): a PR-time CVE scan of a
+  locally-built representative image pair (`user` for the shared JVM base,
+  `notification` for python-slim; `load: true`, never a GHCR ref — nothing is pushed on
+  PRs) plus a `trivy config` misconfig scan over `infra/k8s/`. Pinned to the
+  verified-safe trivy-action v0.35.0 / CLI v0.69.3 — never CLI 0.69.4–0.69.6.
+- **Committed-Secret guard** (`.github/scripts/check-committed-secrets.py`): CI fails if
+  any tracked YAML under `infra/` contains a `kind: Secret` with non-empty
+  `data`/`stringData`. base64 is not encryption and typically evades gitleaks; the
+  guard parses YAML documents (not a text grep), so vendored schema text can't
+  false-positive.
+- **Deliberately not built (named production next step):** GitOps (Argo CD) reconciling
+  a persistent cluster, with **GitHub OIDC** for short-lived cloud credentials. An
+  ephemeral local k3d cluster gives a GitOps operator nothing durable to watch — deploy
+  stays push-based and local. No kubeconfig, no deploy job, no new secret in CI.
+
 ## Layout
 
 ```
@@ -260,7 +325,9 @@ infra/k8s/
     local/
       kustomization.yaml                   # configMapGenerator + secretGenerator (+ grafana-admin), namespace
       secret.env.example                   # committed placeholders (real secret.env is gitignored)
-    prod/.gitkeep                          # empty stub for a later wave
+    prod/                                  # Wave 5d: same base, GHCR SHA-pinned images
+      kustomization.yaml                   # images transformer -> ghcr.io/…/<svc>-service:sha-<longsha>
+      README.md                            # deploy-time `kustomize edit set image` loop
   up.sh  down.sh  README.md
 ```
 
