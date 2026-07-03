@@ -144,6 +144,13 @@ jobs:
               | kubeconform -strict -summary -kubernetes-version 1.32.0 \
                   -schema-location default -schema-location "$CRD" -skip CustomResourceDefinition
           done
+      # Wave 5d: the prod overlay repoints the same base at GHCR SHA-pinned images.
+      # It carries no configMap/secretGenerator, so no secret.env seeding is needed,
+      # and it pulls in core kinds only (observability is validated separately above).
+      - name: Render and validate prod overlay
+        run: |
+          kustomize build infra/k8s/overlays/prod \
+            | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default
 
   # Wave 5d: base64 is not encryption — a committed populated `kind: Secret` leaks its
   # values to anyone with repo read access and typically evades gitleaks. The guard
