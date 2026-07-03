@@ -160,3 +160,79 @@ jobs:
         run: |
           python3 -m pip install --quiet pyyaml
           python3 .github/scripts/check-committed-secrets.py
+
+  # Wave 5d: report-only Trivy CVE scan (SARIF -> Security tab; exit-code 0 never
+  # blocks — promotion to a blocking gate is a later slice, after the baseline is
+  # clean). Scans the LOCALLY-built image (load: true, no push): at PR time nothing
+  # exists in GHCR yet, so scanning a registry ref on a PR would be a bug.
+  # Representative pair instead of all 6: the five Java images share one multi-stage
+  # Maven -> eclipse-temurin:21-jre pattern (near-identical CVE surface), so user
+  # (security-critical) + notification (python:3.12-slim) cover both image families
+  # without five redundant multi-minute builds per PR.
+  # trivy-action is pinned to the verified-safe v0.35.0 release (2026-03 supply-chain
+  # attack: NEVER trivy CLI 0.69.4-0.69.6; v0.69.3 is the verified-safe CLI).
+  trivy-image:
+    name: Trivy image scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # upload-sarif; scoped to this job only
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [user, notification]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # Read-only reuse of the push-images cache (written on main); no cache-to so PR
+      # branches don't evict the main-branch cache entries.
+      - name: Build image locally (no push)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: services/${{ matrix.service }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: scan/${{ matrix.service }}-service:ci
+          cache-from: type=gha,scope=${{ matrix.service }}
+      - name: Trivy CVE scan (report-only)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: image
+          image-ref: scan/${{ matrix.service }}-service:ci
+          format: sarif
+          output: trivy-image-${{ matrix.service }}.sarif
+          exit-code: '0'
+          version: v0.69.3 # verified-safe CLI; never 0.69.4-0.69.6
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: trivy-image-${{ matrix.service }}.sarif
+          category: trivy-image-${{ matrix.service }}
+
+  # Wave 5d: report-only Trivy misconfiguration scan over the Kubernetes manifests
+  # (same safe pin and SARIF/report-only posture as trivy-image).
+  trivy-config:
+    name: Trivy k8s misconfig scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write # upload-sarif; scoped to this job only
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Trivy misconfig scan (report-only)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: config
+          scan-ref: infra/k8s
+          format: sarif
+          output: trivy-config.sarif
+          exit-code: '0'
+          version: v0.69.3 # verified-safe CLI; never 0.69.4-0.69.6
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config-infra-k8s
