@@ -144,3 +144,19 @@ jobs:
               | kubeconform -strict -summary -kubernetes-version 1.32.0 \
                   -schema-location default -schema-location "$CRD" -skip CustomResourceDefinition
           done
+
+  # Wave 5d: base64 is not encryption — a committed populated `kind: Secret` leaks its
+  # values to anyone with repo read access and typically evades gitleaks. The guard
+  # parses every tracked YAML document under infra/ (real parsing, not a text grep, so
+  # vendored schema text cannot false-positive) and fails on any Secret with non-empty
+  # data/stringData. Negative-tested: a synthetic populated Secret turns it RED.
+  secret-guard:
+    name: Committed-Secret guard (infra YAML)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Fail on populated kind Secret in tracked infra YAML
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 .github/scripts/check-committed-secrets.py
