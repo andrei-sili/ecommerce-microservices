@@ -1,23 +1,27 @@
-# prod overlay — GHCR SHA-pinned images
+# prod overlay — GHCR digest-pinned images
 
-Same base as `overlays/local`, with the six service images repointed to the immutable
-GHCR tags pushed by the `push-images` workflow on every merge to `main`:
-`ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service:sha-<longsha>`.
+Same base as `overlays/local`, with the six service images repointed to the GHCR
+images pushed by the `push-images` workflow on every merge to `main`, pinned by
+**digest**: `ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service@sha256:<digest>`.
 
-- **The committed `newTag` is a placeholder** (all zeros): at PR time no image has been
-  pushed yet. Pin the real commit at deploy time:
+- **Why digest, not tag (5d-h):** a digest is content-addressed and truly immutable.
+  GHCR has no native immutable tags, so even the `sha-<longsha>` tag could in
+  principle be re-pushed; the digest cannot. Rollback = set any prior digest.
+- **The committed digest is a placeholder** (all zeros): at PR time no image has been
+  pushed yet. Every `push-images` run prints the exact per-service ref in each matrix
+  job's **run summary** (Actions run page). Pin at deploy time by copying it:
 
   ```bash
   cd infra/k8s/overlays/prod
-  SHA=$(git rev-parse HEAD)   # or any prior main commit for rollback
-  for svc in user product cart order payment notification; do
-    kustomize edit set image \
-      "ecommerce/${svc}-service=ghcr.io/andrei-sili/ecommerce-microservices/${svc}-service:sha-${SHA}"
-  done
+  # one per service; the ref comes verbatim from the push-images run summary
+  kustomize edit set image \
+    "ecommerce/user-service=ghcr.io/andrei-sili/ecommerce-microservices/user-service@sha256:<digest>"
   ```
 
-- **Never a moving tag in prod** (`latest`/`dev`/`main`): a Deployment must reference an
-  exact SHA so a rollout is reproducible and rollback = set any prior SHA.
+  Digests differ per service (unlike the uniform `sha-<longsha>` tag), so there is no
+  single-variable loop — copy each service's line from the run summary.
+- **Never a moving tag in prod** (`latest`/`dev`/`main`): a Deployment must reference
+  immutable content so a rollout is reproducible and rollback is exact.
 - **Secrets/config are deliberately absent.** There is no real cluster yet; this overlay
   carries no configMap/secretGenerator, so it renders without any `secret.env`. When a
   cluster exists, secrets come from an external store (External Secrets Operator +

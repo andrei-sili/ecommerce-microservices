@@ -237,15 +237,20 @@ CRD schema catalog (`-schema-location …/datreeio/CRDs-catalog/…`) plus
 `-skip CustomResourceDefinition` (which skips only the vendored upstream CRD objects —
 every CR stays strictly validated, and a typo'd apiVersion cannot slip through silently).
 
-## Registry & CI/CD (Wave 5d) — GHCR images + report-only scanning
+## Registry & CI/CD (Wave 5d, hardened in 5d-h) — GHCR images + blocking scans
 
 Every merge to `main` builds and pushes all 6 service images to GHCR
 (`.github/workflows/push-images.yml`, Buildx + per-service GHA cache, auth via the
 workflow's own `GITHUB_TOKEN` — no PAT, no new secret):
 
-- `ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service:sha-<longsha>` — immutable,
-  one per commit; what `overlays/prod` references. Rollback = point at any prior SHA.
-- `…:main` — moving branch tag, convenience only. Never referenced by a manifest.
+- `ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service:sha-<longsha>` — one per
+  commit, for traceability.
+- `…:main` — moving branch tag, convenience only (also what the weekly scheduled scan
+  targets). Never referenced by a manifest.
+- **The pushed DIGEST is what `overlays/prod` pins** (5d-h): each matrix job emits
+  `ecommerce/<svc>-service=ghcr.io/…/<svc>-service@sha256:<digest>` into its run
+  summary — copy it verbatim at deploy time. Digests are content-addressed, so they
+  are immutable even though GHCR has no native immutable tags.
 - OCI labels (`org.opencontainers.image.source`) link each package back to this repo.
 
 **One-time GitHub UI steps (repo owner):** set each of the 6 GHCR packages to **public**
@@ -256,14 +261,15 @@ their first green run.
 
 ### Deploying a pushed image (prod overlay)
 
-`overlays/prod` maps every `ecommerce/<svc>-service:dev` to its GHCR image. The
-committed `newTag` is a syntactically-valid placeholder (nothing is pushed at PR time);
-pin the real commit at deploy time — full loop in `overlays/prod/README.md`:
+`overlays/prod` maps every `ecommerce/<svc>-service:dev` to its GHCR image, pinned by
+**digest**. The committed digest is a syntactically-valid placeholder (nothing is
+pushed at PR time); pin the real digests at deploy time by copying each service's ref
+from the `push-images` run summary — details in `overlays/prod/README.md`:
 
 ```bash
 cd infra/k8s/overlays/prod
 kustomize edit set image \
-  "ecommerce/user-service=ghcr.io/andrei-sili/ecommerce-microservices/user-service:sha-$(git rev-parse HEAD)"
+  "ecommerce/user-service=ghcr.io/andrei-sili/ecommerce-microservices/user-service@sha256:<digest>"
 ```
 
 Never a moving tag (`latest`/`dev`/`main`) in prod. With public GHCR packages the
@@ -280,23 +286,34 @@ you "redeploy" and silently run OLD code. After every re-import run
 `kubectl -n ecommerce rollout restart deploy/<svc>-service` (the smoke flow already
 does) — or use per-build tags.
 
-### CI security posture (Wave 5d)
+### CI security posture (Wave 5d, promoted to blocking in 5d-h)
 
 - **Every third-party action is pinned to a full commit SHA** (version as a trailing
   comment) — the 2026-03 Trivy supply-chain attack force-pushed 76/77 of trivy-action's
   tags. Re-verify versions upstream before re-pinning forward, and pin only immutable
-  releases.
-- **Trivy is report-only for now** (SARIF → GitHub Security tab, `exit-code: 0`; a
-  blocking gate is a later slice, once the baseline is clean): a PR-time CVE scan of a
-  locally-built representative image pair (`user` for the shared JVM base,
-  `notification` for python-slim; `load: true`, never a GHCR ref — nothing is pushed on
-  PRs) plus a `trivy config` misconfig scan over `infra/k8s/`. Pinned to the
-  verified-safe trivy-action v0.35.0 / CLI v0.69.3 — never CLI 0.69.4–0.69.6.
+  releases. Pinned to the verified-safe trivy-action v0.35.0 / CLI v0.69.3 — never
+  CLI 0.69.4–0.69.6.
+- **Trivy image scan is a BLOCKING PR gate**: fails on any CRITICAL CVE with a fix
+  available (`ignore-unfixed: true` — unfixed base-image CVEs must not block forever)
+  in the locally-built representative pair (`user` for the shared JVM base,
+  `notification` for python-slim; `load: true`, never a GHCR ref — nothing is pushed
+  on PRs). HIGH is deliberately not blocking yet: the triaged baseline carries 29
+  fixed HIGHs from the Spring Boot 3.3.4 dependency platform (owner: dev-java) —
+  promote HIGH once that bump lands.
+- **Trivy misconfig scan is split by provenance**: BLOCKING at CRITICAL,HIGH on
+  hand-written manifests (all of `infra/` minus the vendored
+  `observability/{metrics,logs}/rendered.yaml`); report-only on the vendored trees
+  (upstream chart output we never hand-patch). Exceptions to either gate live ONLY in
+  `.github/trivyignore` (id + justification + owner + date); the SARIF reports in the
+  Security tab stay unfiltered.
+- **Weekly full-fleet scan** (`.github/workflows/scheduled-image-scan.yml`): every
+  Monday, report-only Trivy CVE scan of all six pushed `:main` GHCR images — a CVE
+  disclosed after the last merge still surfaces within a week.
 - **Committed-Secret guard** (`.github/scripts/check-committed-secrets.py`): CI fails if
-  any tracked YAML under `infra/` contains a `kind: Secret` with non-empty
+  any tracked YAML **or JSON** under `infra/` contains a `kind: Secret` with non-empty
   `data`/`stringData`. base64 is not encryption and typically evades gitleaks; the
-  guard parses YAML documents (not a text grep), so vendored schema text can't
-  false-positive.
+  guard parses documents (not a text grep), so vendored schema text and Grafana
+  dashboard JSON can't false-positive, and unparseable files fail closed.
 - **Deliberately not built (named production next step):** GitOps (Argo CD) reconciling
   a persistent cluster, with **GitHub OIDC** for short-lived cloud credentials. An
   ephemeral local k3d cluster gives a GitOps operator nothing durable to watch — deploy
@@ -325,9 +342,9 @@ infra/k8s/
     local/
       kustomization.yaml                   # configMapGenerator + secretGenerator (+ grafana-admin), namespace
       secret.env.example                   # committed placeholders (real secret.env is gitignored)
-    prod/                                  # Wave 5d: same base, GHCR SHA-pinned images
-      kustomization.yaml                   # images transformer -> ghcr.io/…/<svc>-service:sha-<longsha>
-      README.md                            # deploy-time `kustomize edit set image` loop
+    prod/                                  # Wave 5d/5d-h: same base, GHCR digest-pinned images
+      kustomization.yaml                   # images transformer -> ghcr.io/…/<svc>-service@sha256:<digest>
+      README.md                            # deploy-time `kustomize edit set image` flow (digests from run summary)
   up.sh  down.sh  README.md
 ```
 

@@ -2,14 +2,17 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 # Wave 5d prod overlay — minimal and honest: the same base, with every service image
-# repointed from the locally-built `ecommerce/<svc>-service:dev` to the immutable
-# GHCR git-SHA tag pushed by the push-images workflow on merge to main. Never a
-# moving tag (latest/dev/main) in prod: rollback = set any prior SHA.
+# repointed from the locally-built `ecommerce/<svc>-service:dev` to the GHCR image
+# pushed by the push-images workflow on merge to main, pinned by DIGEST (5d-h).
+# A digest is content-addressed and therefore truly immutable — GHCR has no native
+# immutable tags, so even the `sha-<longsha>` tag is re-pushable in principle. Never
+# a moving tag (latest/dev/main) in prod: rollback = set any prior digest.
 #
-# The committed newTag is a syntactically-valid PLACEHOLDER (no image exists at PR
-# time — the first push happens post-merge). Set the real tag at deploy time:
+# The committed digest is a syntactically-valid PLACEHOLDER (no image exists at PR
+# time — the first push happens post-merge). Every push-images run prints the real
+# per-service digests in its run summary; pin at deploy time with:
 #   cd infra/k8s/overlays/prod
-#   kustomize edit set image ecommerce/<svc>-service=ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service:sha-<longsha>
+#   kustomize edit set image ecommerce/<svc>-service=ghcr.io/andrei-sili/ecommerce-microservices/<svc>-service@sha256:<digest>
 # See README.md here and infra/k8s/README.md ("Registry & CI/CD").
 #
 # Deliberately NOT here: configMap/secretGenerator. Secrets/config for a real cluster
@@ -24,19 +27,19 @@ resources:
 images:
   - name: ecommerce/user-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/user-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: ecommerce/product-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/product-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: ecommerce/cart-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/cart-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: ecommerce/order-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/order-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: ecommerce/payment-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/payment-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   - name: ecommerce/notification-service
     newName: ghcr.io/andrei-sili/ecommerce-microservices/notification-service
-    newTag: sha-0000000000000000000000000000000000000000
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000

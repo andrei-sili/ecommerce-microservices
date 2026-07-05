@@ -55,6 +55,7 @@ jobs:
       # Single-arch on purpose (runners + target machine are amd64; QEMU doubles build
       # time for nothing). Per-service cache scope: six services thrash a shared 10 GB cache.
       - name: Build and push
+        id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: services/${{ matrix.service }}
@@ -64,3 +65,14 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+      # Wave 5d-h: overlays/prod pins images by DIGEST (content-addressed — GHCR has no
+      # native immutable tags). Surface each pushed digest on the run page so the deploy
+      # flow can copy the exact ref (see infra/k8s/overlays/prod/README.md).
+      - name: Emit pushed digest to run summary
+        run: |
+          {
+            echo '`kustomize edit set image` ref for overlays/prod:'
+            echo '```'
+            echo "ecommerce/${{ matrix.service }}-service=ghcr.io/${{ github.repository }}/${{ matrix.service }}-service@${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
