@@ -123,7 +123,9 @@ jobs:
           tar -xzf kubeconform.tgz kubeconform && sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
       - name: Seed placeholder secret.env (the real one is gitignored; never committed)
         working-directory: infra/k8s/overlays/local
-        run: cp secret.env.example secret.env
+        run: |
+          cp secret.env.example secret.env
+          cp grafana.env.example grafana.env
       - name: Render and validate manifests
         run: |
           kustomize build infra/k8s/overlays/local \
