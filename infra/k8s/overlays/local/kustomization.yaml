@@ -86,13 +86,15 @@ secretGenerator:
   # `grafana-admin` by FIXED name via existingSecret — it can't follow the hash suffix
   # kustomize appends to `ecommerce-secrets`, so this one turns the suffix OFF. It is
   # applied by `kubectl apply -k overlays/local` (up.sh step 6), BEFORE the separate
-  # metrics apply, so the name resolves when Grafana starts. Grafana consumes ONLY the
-  # GRAFANA_ADMIN_* keys via secretKeyRef; no value is ever committed (secret.env is
-  # gitignored). NOTE: kustomize secretGenerator cannot cherry-pick keys from an env
-  # file, so this Secret mirrors ecommerce-secrets' contents — same namespace, same
-  # blast radius (both fully decodable with secret-read RBAC), zero secret in git.
+  # metrics apply, so the name resolves when Grafana starts.
+  # 5c-h: reads the DEDICATED gitignored grafana.env (GRAFANA_ADMIN_USER/_PASSWORD and
+  # nothing else). secretGenerator cannot cherry-pick keys from an env file, so feeding
+  # it secret.env mirrored EVERY app secret (JWT_SECRET included) into this Secret —
+  # the 2-key file shrinks the blast radius to exactly the admin login. up.sh seeds
+  # grafana.env (migrating GRAFANA_ADMIN_* out of an existing secret.env on first run);
+  # no value is ever committed (grafana.env is gitignored).
   - name: grafana-admin
     options:
       disableNameSuffixHash: true
     envs:
-      - secret.env
+      - grafana.env
