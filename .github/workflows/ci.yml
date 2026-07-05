@@ -172,8 +172,11 @@ jobs:
   # executed after triaging the baseline on 2026-07-05). Policy: fail on CRITICAL with
   # an available fix (ignore-unfixed: true — unfixed base-image CVEs must not block
   # forever). HIGH stays report-only for now: the triaged baseline carries 29 fixed
-  # HIGHs, all from the Spring Boot 3.3.4 dependency platform (owner: dev-java) —
-  # promote HIGH once that bump lands. Exceptions live in .github/trivyignore
+  # HIGHs = 22 Spring-platform deps (owner: dev-java, cleared by the Spring bump) +
+  # 7 base-image Go CVEs in pebble (cleared by a base-image refresh in the service
+  # Dockerfiles) — promote HIGH only once BOTH land (or the pebble CVEs get
+  # documented exceptions), otherwise the gate surprise-fails. Exceptions live in
+  # .github/trivyignore
   # (id + justification + owner + date); the gate is otherwise non-negotiable.
   # Two scans on purpose: trivy-action drops the severity filter when format=sarif,
   # so a single SARIF run with exit-code 1 would block on ANY severity. The SARIF

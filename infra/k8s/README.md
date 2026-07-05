@@ -298,8 +298,10 @@ does) — or use per-build tags.
   in the locally-built representative pair (`user` for the shared JVM base,
   `notification` for python-slim; `load: true`, never a GHCR ref — nothing is pushed
   on PRs). HIGH is deliberately not blocking yet: the triaged baseline carries 29
-  fixed HIGHs from the Spring Boot 3.3.4 dependency platform (owner: dev-java) —
-  promote HIGH once that bump lands.
+  fixed HIGHs — 22 Spring-platform deps (owner: dev-java, cleared by the Spring bump)
+  + 7 base-image Go CVEs in `pebble` (cleared by a base-image refresh in the service
+  Dockerfiles). Promote HIGH only once BOTH land (or the pebble CVEs get documented
+  exceptions), otherwise the gate surprise-fails.
 - **Trivy misconfig scan is split by provenance**: BLOCKING at CRITICAL,HIGH on
   hand-written manifests (all of `infra/` minus the vendored
   `observability/{metrics,logs}/rendered.yaml`); report-only on the vendored trees
