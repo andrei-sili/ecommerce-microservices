@@ -168,14 +168,27 @@ jobs:
           python3 -m pip install --quiet pyyaml==6.0.3 # pinned: sole third-party dep of a security gate
           python3 .github/scripts/check-committed-secrets.py
 
-  # Wave 5d: report-only Trivy CVE scan (SARIF -> Security tab; exit-code 0 never
-  # blocks — promotion to a blocking gate is a later slice, after the baseline is
-  # clean). Scans the LOCALLY-built image (load: true, no push): at PR time nothing
+  # Wave 5d-h: Trivy CVE scan — now a BLOCKING gate (the promotion Wave 5d contracted,
+  # executed after triaging the baseline on 2026-07-05). Policy: fail on CRITICAL with
+  # an available fix (ignore-unfixed: true — unfixed base-image CVEs must not block
+  # forever). HIGH stays report-only for now: the triaged baseline carries 29 fixed
+  # HIGHs = 22 Spring-platform deps (owner: dev-java, cleared by the Spring bump) +
+  # 7 base-image Go CVEs in pebble (cleared by a base-image refresh in the service
+  # Dockerfiles) — promote HIGH only once BOTH land (or the pebble CVEs get
+  # documented exceptions), otherwise the gate surprise-fails. Exceptions live in
+  # .github/trivyignore
+  # (id + justification + owner + date); the gate is otherwise non-negotiable.
+  # Two scans on purpose: trivy-action drops the severity filter when format=sarif,
+  # so a single SARIF run with exit-code 1 would block on ANY severity. The SARIF
+  # report stays UNFILTERED (no ignorefile — the Security tab shows the full truth);
+  # only the gate scan applies the policy.
+  # Scans the LOCALLY-built image (load: true, no push): at PR time nothing
   # exists in GHCR yet, so scanning a registry ref on a PR would be a bug.
   # Representative pair instead of all 6: the five Java images share one multi-stage
   # Maven -> eclipse-temurin:21-jre pattern (near-identical CVE surface), so user
   # (security-critical) + notification (python:3.12-slim) cover both image families
-  # without five redundant multi-minute builds per PR.
+  # without five redundant multi-minute builds per PR. The weekly scheduled-image-scan
+  # workflow covers all 6 pushed images.
   # trivy-action is pinned to the verified-safe v0.35.0 release (2026-03 supply-chain
   # attack: NEVER trivy CLI 0.69.4-0.69.6; v0.69.3 is the verified-safe CLI).
   trivy-image:
@@ -203,7 +216,7 @@ jobs:
           push: false
           tags: scan/${{ matrix.service }}-service:ci
           cache-from: type=gha,scope=${{ matrix.service }}
-      - name: Trivy CVE scan (report-only)
+      - name: Trivy CVE scan (SARIF report, unfiltered)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
         with:
           scan-type: image
@@ -217,9 +230,30 @@ jobs:
         with:
           sarif_file: trivy-image-${{ matrix.service }}.sarif
           category: trivy-image-${{ matrix.service }}
+      # Runs after the SARIF upload so the report lands even when the gate is red.
+      # Reuses the trivy CLI + vuln DB installed by the report scan above.
+      - name: Trivy CVE gate (BLOCKING, CRITICAL with fix available)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: image
+          image-ref: scan/${{ matrix.service }}-service:ci
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+          ignore-unfixed: true
+          trivyignores: .github/trivyignore
+          skip-setup-trivy: true
 
-  # Wave 5d: report-only Trivy misconfiguration scan over the Kubernetes manifests
-  # (same safe pin and SARIF/report-only posture as trivy-image).
+  # Wave 5d-h: Trivy misconfiguration scan, split by PROVENANCE (the promotion Wave 5d
+  # contracted, executed after triaging the baseline on 2026-07-05):
+  #   - hand-written manifests (everything under infra/ EXCEPT the two vendored
+  #     rendered.yaml trees) -> BLOCKING at CRITICAL,HIGH. Exceptions live in
+  #     .github/trivyignore (id + justification + owner + date).
+  #   - vendored observability rendered.yaml (upstream `helm template` output we never
+  #     hand-patch; provenance stays byte-for-byte) -> report-only, own SARIF categories.
+  # SARIF reports stay UNFILTERED (no ignorefile) — only the gate applies the policy.
+  # The hand-written report keeps the 5d category name (trivy-config-infra-k8s) so the
+  # existing Security-tab analysis is superseded instead of orphaned.
   trivy-config:
     name: Trivy k8s misconfig scan
     runs-on: ubuntu-latest
@@ -229,17 +263,58 @@ jobs:
       security-events: write # upload-sarif; scoped to this job only
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Trivy misconfig scan (report-only)
+      - name: Trivy misconfig scan, hand-written manifests (SARIF report, unfiltered)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
         with:
           scan-type: config
-          scan-ref: infra/k8s
+          scan-ref: infra
+          skip-files: infra/k8s/base/observability/metrics/rendered.yaml,infra/k8s/base/observability/logs/rendered.yaml
           format: sarif
-          output: trivy-config.sarif
+          output: trivy-config-infra.sarif
           exit-code: '0'
           version: v0.69.3 # verified-safe CLI; never 0.69.4-0.69.6
-      - name: Upload SARIF
+      - name: Upload SARIF (hand-written)
         uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
         with:
-          sarif_file: trivy-config.sarif
+          sarif_file: trivy-config-infra.sarif
           category: trivy-config-infra-k8s
+      - name: Trivy misconfig scan, vendored metrics (report-only)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: config
+          scan-ref: infra/k8s/base/observability/metrics/rendered.yaml
+          format: sarif
+          output: trivy-config-vendored-metrics.sarif
+          exit-code: '0'
+          skip-setup-trivy: true
+      - name: Upload SARIF (vendored metrics)
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: trivy-config-vendored-metrics.sarif
+          category: trivy-config-vendored-metrics
+      - name: Trivy misconfig scan, vendored logs (report-only)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: config
+          scan-ref: infra/k8s/base/observability/logs/rendered.yaml
+          format: sarif
+          output: trivy-config-vendored-logs.sarif
+          exit-code: '0'
+          skip-setup-trivy: true
+      - name: Upload SARIF (vendored logs)
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: trivy-config-vendored-logs.sarif
+          category: trivy-config-vendored-logs
+      # Runs after the SARIF uploads so the reports land even when the gate is red.
+      - name: Trivy misconfig gate (BLOCKING, CRITICAL+HIGH on hand-written)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: config
+          scan-ref: infra
+          skip-files: infra/k8s/base/observability/metrics/rendered.yaml,infra/k8s/base/observability/logs/rendered.yaml
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          trivyignores: .github/trivyignore
+          skip-setup-trivy: true

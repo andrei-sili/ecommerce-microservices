@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Fail if any tracked YAML under infra/ contains a populated Kubernetes Secret.
+"""Fail if any tracked YAML or JSON under infra/ contains a populated Kubernetes Secret.
 
 base64 is not encryption: a committed `kind: Secret` with data/stringData hands its
 values to anyone with repo read access, and base64 blobs typically evade gitleaks.
-This parses YAML documents (never a text grep), so the literal string "kind: Secret"
-inside CRD schema descriptions (e.g. vendored rendered.yaml) cannot false-positive,
-and a real Secret document cannot hide in formatting. Unparseable YAML fails closed.
+This parses YAML/JSON documents (never a text grep), so the literal string
+"kind: Secret" inside CRD schema descriptions (e.g. vendored rendered.yaml) cannot
+false-positive, and a real Secret document cannot hide in formatting. JSON files that
+are not Kubernetes manifests (e.g. Grafana dashboards) parse cleanly and are only
+flagged when a document's kind == Secret. Unparseable files fail closed.
 """
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from typing import Any, Iterator
@@ -31,18 +34,30 @@ GuardLoader.add_constructor(
 )
 
 
-def tracked_yaml_files() -> list[str]:
+def tracked_manifest_files() -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "-z", "--", "infra"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    return [p for p in out.split("\0") if p.endswith((".yaml", ".yml"))]
+    return [p for p in out.split("\0") if p.endswith((".yaml", ".yml", ".json"))]
+
+
+def parse_documents(path: str, text: str) -> list[Any]:
+    """Parse a file into its documents; a JSON file is a single document."""
+    if path.endswith(".json"):
+        return [json.loads(text)]
+    return list(yaml.load_all(text, Loader=GuardLoader))
 
 
 def k8s_objects(node: Any) -> Iterator[dict]:
-    """Yield the object and, for kind: List / *List wrappers, its items."""
+    """Yield each object and, for kind: List / *List wrappers, its items."""
+    if isinstance(node, list):
+        # A top-level array (possible in JSON) can hold manifests directly.
+        for item in node:
+            yield from k8s_objects(item)
+        return
     if not isinstance(node, dict):
         return
     yield node
@@ -56,26 +71,27 @@ def is_populated_secret(obj: dict) -> bool:
     if obj.get("kind") != "Secret":
         return False
     return any(
-        isinstance(obj.get(field), dict) and obj[field] for field in ("data", "stringData")
+        isinstance(obj.get(field), dict) and obj[field]
+        for field in ("data", "stringData")
     )
 
 
 def main() -> int:
-    files = tracked_yaml_files()
+    files = tracked_manifest_files()
     violations: list[str] = []
     errors: list[str] = []
     for path in files:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         try:
-            for index, doc in enumerate(yaml.load_all(text, Loader=GuardLoader)):
+            for index, doc in enumerate(parse_documents(path, text)):
                 for obj in k8s_objects(doc):
                     if is_populated_secret(obj):
                         name = (obj.get("metadata") or {}).get("name", "<unnamed>")
                         violations.append(f"{path} (document {index}, Secret '{name}')")
-        except yaml.YAMLError as exc:
+        except (yaml.YAMLError, json.JSONDecodeError) as exc:
             # Fail closed: a file the guard cannot parse is a file it cannot clear.
-            errors.append(f"{path}: YAML parse error: {exc}")
+            errors.append(f"{path}: parse error: {exc}")
 
     for line in errors:
         print(f"::error::{line}")
@@ -89,7 +105,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"Committed-Secret guard passed: {len(files)} tracked YAML files, no populated Secret.")
+    print(
+        f"Committed-Secret guard passed: {len(files)} tracked YAML/JSON files, "
+        "no populated Secret."
+    )
     return 0
 
 

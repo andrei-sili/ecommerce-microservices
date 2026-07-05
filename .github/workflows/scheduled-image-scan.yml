@@ -1,0 +1,46 @@
+# Wave 5d-h: weekly Trivy CVE scan of ALL SIX pushed GHCR `:main` images.
+# The PR-time gate in ci.yml scans only the representative pair (user + notification)
+# against the locally-built image; this schedule covers the whole fleet against the
+# images actually published, so a CVE disclosed AFTER the last merge still surfaces
+# in the Security tab within a week (report-only — a cron run has no PR to block).
+# Every third-party action is pinned to a full commit SHA (2026-03 Trivy supply-chain
+# attack); trivy CLI pinned to the verified-safe v0.69.3 — NEVER 0.69.4-0.69.6.
+name: Scheduled image scan
+
+on:
+  schedule:
+    - cron: '17 5 * * 1' # Mondays 05:17 UTC — quiet slot, off the busy on-the-hour spikes
+
+permissions:
+  contents: read
+  security-events: write # upload-sarif
+
+jobs:
+  scan:
+    name: Trivy scheduled scan (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [user, product, cart, order, payment, notification]
+    steps:
+      # Checkout so upload-sarif associates the analysis with the current default-branch commit.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      # Packages are public: anonymous pull, no registry login, no secret.
+      # exit-code stays 0 (report-only), but a scan ERROR (e.g. image missing) still
+      # fails the job — we want to hear about a vanished :main image.
+      - name: Trivy CVE scan (report-only)
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
+        with:
+          scan-type: image
+          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.service }}-service:main
+          format: sarif
+          output: trivy-scheduled-${{ matrix.service }}.sarif
+          exit-code: '0'
+          version: v0.69.3 # verified-safe CLI; never 0.69.4-0.69.6
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4.36.3
+        with:
+          sarif_file: trivy-scheduled-${{ matrix.service }}.sarif
+          category: trivy-scheduled-${{ matrix.service }}
