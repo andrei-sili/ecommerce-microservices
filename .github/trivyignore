@@ -1,0 +1,39 @@
+# Trivy policy exceptions — the ONLY sanctioned way past the blocking scans in ci.yml.
+# Every entry carries: finding id, one-line justification, owner, and the date added.
+# This file is applied ONLY to the blocking gate scans; the SARIF reports uploaded to
+# the Security tab stay unfiltered, so ignored findings remain visible there.
+#
+# ---- Image CVE gate (severity CRITICAL, ignore-unfixed) ----------------------------
+# All six CRITICALs below come from the Spring Boot 3.3.4 dependency platform shared
+# by the five Java services. The fix is a Spring Boot version bump in the services'
+# pom.xml (owner: dev-java) — flagged as a follow-up on 2026-07-05. Remove these
+# entries when the bump lands.
+
+# tomcat-embed-core 10.1.30: partial-PUT path-equivalence RCE; requires writes +
+# partial PUT enabled (not our Spring Boot config). dev-java bump. 2026-07-05
+CVE-2025-24813
+# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
+CVE-2026-41293
+# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
+CVE-2026-43512
+# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
+CVE-2026-43515
+# spring-security-web 6.3.3: WebFlux-only static-resource auth bypass; our services
+# are Spring MVC. dev-java bump. 2026-07-05
+CVE-2024-38821
+# spring-security-web 6.3.3: fixed in 6.5.9/7.0.4. dev-java bump. 2026-07-05
+CVE-2026-22732
+
+# ---- K8s misconfig gate (severity CRITICAL,HIGH on hand-written manifests) ---------
+# Both checks fire on every workload we ship and need RUNTIME changes (readOnly root
+# filesystem + writable emptyDir mounts; securityContext on the Postgres/RabbitMQ
+# root entrypoints) that cannot be verified in this CI-only slice (no cluster touch).
+# Follow-up hardening slice proposed to the Lead on 2026-07-05: apply + verify live
+# on k3d, then delete these two entries so the checks enforce again.
+
+# KSV-0014 readOnlyRootFilesystem not set — needs per-workload writable-path mounts,
+# live-verified on k3d first. 2026-07-05
+AVD-KSV-0014
+# KSV-0118 default securityContext (pod level, init containers, DB/broker containers)
+# — same follow-up hardening slice. 2026-07-05
+AVD-KSV-0118
