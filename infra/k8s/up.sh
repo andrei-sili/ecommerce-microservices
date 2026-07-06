@@ -201,7 +201,7 @@ The RabbitMQ management UI has no public route (internal only) — reach it with
 Observability (Wave 5c) is ClusterIP-only — NO Kong route, NO NodePort. Port-forward:
   kubectl -n ecommerce port-forward svc/kube-prometheus-stack-grafana 3000:80   # Grafana -> http://localhost:3000
   kubectl -n ecommerce port-forward svc/kps-prometheus 9090:9090                # Prometheus -> http://localhost:9090
-Grafana admin: user/password from the grafana-admin Secret (secret.env GRAFANA_ADMIN_*).
+Grafana admin: user/password from the grafana-admin Secret (grafana.env GRAFANA_ADMIN_*).
   Prometheus -> Status -> Targets: 5 Spring /actuator/prometheus + notification /metrics +
   rabbitmq :15692 + kong :8100 (the service targets stay DOWN until the instrumented
   service images are built). Grafana dashboards: Spring HTTP/JVM, FastAPI, RabbitMQ, Kong.
