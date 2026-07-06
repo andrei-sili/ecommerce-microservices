@@ -141,18 +141,28 @@ NodePort**. Metrics endpoints stay ClusterIP-internal and off `/api/v1`.
   force-skip with `SKIP_LOGS=1`. Logs are **disposable** (emptyDir → dropped on pod
   restart), never presented as durable.
 - **Grafana admin, public-repo-safe:** `GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD` live
-  in the gitignored `secret.env` (placeholders in `secret.env.example`). They are delivered
+  in the **dedicated gitignored `overlays/local/grafana.env`** (placeholders in
+  `grafana.env.example`; `up.sh` seeds it, migrating any `GRAFANA_ADMIN_*` keys out of a
+  pre-existing `secret.env` so a running cluster's login doesn't change). They are delivered
   through a **stable-named `grafana-admin` Secret** (`overlays/local` `secretGenerator`
   with `disableNameSuffixHash: true`) that the vendored chart references by fixed name via
   `existingSecret` — the hash-suffixed `ecommerce-secrets` name can't be followed by a
   static rendered manifest. It is created by the `overlays/local` apply, before the metrics
-  apply, so the name resolves when Grafana starts. Anonymous viewer is **OFF**. (Note:
-  kustomize `secretGenerator` can't cherry-pick keys from an env file, so `grafana-admin`
-  mirrors `ecommerce-secrets`' contents — same namespace, same blast radius; Grafana
-  consumes only the `GRAFANA_ADMIN_*` keys via `secretKeyRef`, and no value is ever
-  committed.) Because `grafana-admin` has **no content-hash suffix**, rotating the
-  password does NOT roll the Grafana pod — restart it manually:
+  apply, so the name resolves when Grafana starts. Anonymous viewer is **OFF**. The env
+  file is 2-key **on purpose**: `secretGenerator` ingests a whole env file, and feeding it
+  `secret.env` (pre-hardening) mirrored EVERY app secret into `grafana-admin`. Because
+  `grafana-admin` has **no content-hash suffix**, rotating the password does NOT roll the
+  Grafana pod — restart it manually:
   `kubectl -n ecommerce rollout restart deploy/kube-prometheus-stack-grafana`.
+- **Grafana RBAC is namespace-scoped** (`grafana.rbac.namespaced: true` +
+  `sidecar.dashboards.searchNamespace: null` in `values-metrics.yaml`): the chart default
+  binds the Grafana ServiceAccount to a ClusterRole with get/watch/list on ConfigMaps AND
+  **Secrets cluster-wide**; the rendered manifest now carries a Role/RoleBinding in
+  `ecommerce` instead, and the dashboards sidecar watches only its own namespace (all
+  dashboard ConfigMaps and the chart's datasource ConfigMap live there). **Migration on a
+  pre-hardening cluster:** `kubectl apply` does not prune, so delete the stale pair once —
+  `kubectl delete clusterrolebinding kube-prometheus-stack-grafana-clusterrolebinding &&
+  kubectl delete clusterrole kube-prometheus-stack-grafana-clusterrole`.
 - **Images** are pulled by kubelet from public registries at bring-up (NOT `k3d image
   import`ed — import doubles host+node storage and **disk is the tight constraint**;
   keep ~15 GB free). First observability bring-up needs internet for ~7 images (~1.3 GB).
@@ -171,13 +181,16 @@ pinned to `prometheus`/`loki` by `dashboards/normalize.py`. Re-fetch/regenerate 
 
 ## Secrets — nothing secret in git
 
-- Real values live in **`overlays/local/secret.env`**, which is **gitignored** (matches the root
-  `.gitignore` rule `*.env`). Only `secret.env.example` (placeholders) is committed.
+- Real values live in **`overlays/local/secret.env`** (app stack) and
+  **`overlays/local/grafana.env`** (Grafana admin login only), both **gitignored** (matches
+  the root `.gitignore` rule `*.env`). Only the `.example` placeholders are committed.
   ```bash
-  cp overlays/local/secret.env.example overlays/local/secret.env   # then fill real values
-  git check-ignore overlays/local/secret.env                        # must print the path (ignored)
+  cp overlays/local/secret.env.example overlays/local/secret.env     # then fill real values
+  cp overlays/local/grafana.env.example overlays/local/grafana.env   # then set a real password
+  git check-ignore overlays/local/secret.env overlays/local/grafana.env  # must print both (ignored)
   ```
-  It uses the same key scheme as `infra/.env`, so the placeholders already boot a working dev stack.
+  `secret.env` uses the same key scheme as `infra/.env`, so the placeholders already boot a
+  working dev stack.
 ### Secrets design (why one Secret is safe here)
 
 - The overlay's `secretGenerator` reads `secret.env` into **one** `ecommerce-secrets` Secret (content-hash
@@ -344,6 +357,7 @@ infra/k8s/
     local/
       kustomization.yaml                   # configMapGenerator + secretGenerator (+ grafana-admin), namespace
       secret.env.example                   # committed placeholders (real secret.env is gitignored)
+      grafana.env.example                  # committed placeholders (real grafana.env is gitignored; 2-key)
     prod/                                  # Wave 5d/5d-h: same base, GHCR digest-pinned images
       kustomization.yaml                   # images transformer -> ghcr.io/…/<svc>-service@sha256:<digest>
       README.md                            # deploy-time `kustomize edit set image` flow (digests from run summary)

@@ -100,6 +100,21 @@ if [ ! -f "$OVERLAY/secret.env" ]; then
   cp "$OVERLAY/secret.env.example" "$OVERLAY/secret.env"
   echo "   edit $OVERLAY/secret.env to set real local values (placeholders boot a working dev stack)."
 fi
+# 5c-h: the Grafana admin login lives in its own 2-key grafana.env, so the
+# grafana-admin Secret stops mirroring every app secret. First seed migrates
+# GRAFANA_ADMIN_* out of a pre-5c-h secret.env so a running cluster's login
+# does not silently change.
+if [ ! -f "$OVERLAY/grafana.env" ]; then
+  if grep -qs '^GRAFANA_ADMIN_' "$OVERLAY/secret.env"; then
+    log "no grafana.env yet — migrating GRAFANA_ADMIN_* from secret.env (login unchanged)"
+    grep '^GRAFANA_ADMIN_' "$OVERLAY/secret.env" > "$OVERLAY/grafana.env"
+    echo "   you can now DELETE the GRAFANA_ADMIN_* lines from $OVERLAY/secret.env (no longer read)."
+  else
+    log "no grafana.env yet — seeding from grafana.env.example (REVIEW before any shared use)"
+    cp "$OVERLAY/grafana.env.example" "$OVERLAY/grafana.env"
+    echo "   edit $OVERLAY/grafana.env to set a real admin password."
+  fi
+fi
 
 # --- 6. apply ---------------------------------------------------------------
 log "applying overlays/local"
@@ -186,7 +201,7 @@ The RabbitMQ management UI has no public route (internal only) — reach it with
 Observability (Wave 5c) is ClusterIP-only — NO Kong route, NO NodePort. Port-forward:
   kubectl -n ecommerce port-forward svc/kube-prometheus-stack-grafana 3000:80   # Grafana -> http://localhost:3000
   kubectl -n ecommerce port-forward svc/kps-prometheus 9090:9090                # Prometheus -> http://localhost:9090
-Grafana admin: user/password from the grafana-admin Secret (secret.env GRAFANA_ADMIN_*).
+Grafana admin: user/password from the grafana-admin Secret (grafana.env GRAFANA_ADMIN_*).
   Prometheus -> Status -> Targets: 5 Spring /actuator/prometheus + notification /metrics +
   rabbitmq :15692 + kong :8100 (the service targets stay DOWN until the instrumented
   service images are built). Grafana dashboards: Spring HTTP/JVM, FastAPI, RabbitMQ, Kong.

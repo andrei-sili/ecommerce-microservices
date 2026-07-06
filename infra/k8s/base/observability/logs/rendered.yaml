@@ -521,8 +521,9 @@ metadata:
     app.kubernetes.io/component: config
 data:
   config.alloy: |-
-    // Discover every pod on THIS node (the DaemonSet field selector is applied by the
-    // chart via HOSTNAME); build Loki labels + the /var/log/pods file path from pod meta.
+    // Discover ALL pods CLUSTER-WIDE (no per-node field selector — acceptable on this
+    // single-node cluster; only files present under this node's /var/log/pods can
+    // match anyway); build Loki labels + the file path from pod meta.
     discovery.kubernetes "pods" {
       role = "pod"
     }
