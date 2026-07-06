@@ -3,26 +3,30 @@
 # This file is applied ONLY to the blocking gate scans; the SARIF reports uploaded to
 # the Security tab stay unfiltered, so ignored findings remain visible there.
 #
-# ---- Image CVE gate (severity CRITICAL, ignore-unfixed) ----------------------------
-# All six CRITICALs below come from the Spring Boot 3.3.4 dependency platform shared
-# by the five Java services. The fix is a Spring Boot version bump in the services'
-# pom.xml (owner: dev-java) — flagged as a follow-up on 2026-07-05. Remove these
-# entries when the bump lands.
+# ---- Image CVE gate (severity CRITICAL,HIGH, ignore-unfixed) ------------------------
+# 2026-07-06: the Spring Boot 3.5.16 bump (PRs #25-#29) cleared the six previously
+# waived Spring/Tomcat CRITICALs, so those entries are gone. The rebuilt images carry
+# 0 CRITICAL and 0 HIGH in our Java dependencies and OS packages.
+#
+# The seven HIGHs below all live in the /usr/bin/pebble Go binary shipped inside the
+# CURRENT eclipse-temurin:21-jre base image — not in our code or our dependencies.
+# We cannot patch a Go binary baked into the base image; the fix must arrive as a
+# temurin base refresh built with the fixed Go toolchain/modules. Owner: devops.
+#
+# REMOVAL CONDITION: delete all seven entries as soon as a temurin base refresh ships
+# a fixed pebble. Watchdog: the weekly scheduled-image-scan workflow runs report-only
+# with NO ignorefile, so these findings stay visible there week over week; re-check
+# this block on every base-image refresh.
 
-# tomcat-embed-core 10.1.30: partial-PUT path-equivalence RCE; requires writes +
-# partial PUT enabled (not our Spring Boot config). dev-java bump. 2026-07-05
-CVE-2025-24813
-# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
-CVE-2026-41293
-# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
-CVE-2026-43512
-# tomcat-embed-core 10.1.30: fixed in 10.1.55 (needs a newer Boot line). dev-java bump. 2026-07-05
-CVE-2026-43515
-# spring-security-web 6.3.3: WebFlux-only static-resource auth bypass; our services
-# are Spring MVC. dev-java bump. 2026-07-05
-CVE-2024-38821
-# spring-security-web 6.3.3: fixed in 6.5.9/7.0.4. dev-java bump. 2026-07-05
-CVE-2026-22732
+# pebble: golang.org/x/net v0.40.0 — fixed upstream in x/net 0.53/0.55. devops. 2026-07-06
+CVE-2026-25681
+CVE-2026-27136
+CVE-2026-33814
+CVE-2026-39821
+CVE-2026-42502
+# pebble: Go stdlib 1.26.3 — fixed upstream in Go 1.26.4. devops. 2026-07-06
+CVE-2026-27145
+CVE-2026-42504
 
 # ---- K8s misconfig gate (severity CRITICAL,HIGH on hand-written manifests) ---------
 # Both checks fire on every workload we ship and need RUNTIME changes (readOnly root

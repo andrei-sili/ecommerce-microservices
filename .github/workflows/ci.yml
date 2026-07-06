@@ -170,16 +170,14 @@ jobs:
           python3 -m pip install --quiet pyyaml==6.0.3 # pinned: sole third-party dep of a security gate
           python3 .github/scripts/check-committed-secrets.py
 
-  # Wave 5d-h: Trivy CVE scan — now a BLOCKING gate (the promotion Wave 5d contracted,
-  # executed after triaging the baseline on 2026-07-05). Policy: fail on CRITICAL with
-  # an available fix (ignore-unfixed: true — unfixed base-image CVEs must not block
-  # forever). HIGH stays report-only for now: the triaged baseline carries 29 fixed
-  # HIGHs = 22 Spring-platform deps (owner: dev-java, cleared by the Spring bump) +
-  # 7 base-image Go CVEs in pebble (cleared by a base-image refresh in the service
-  # Dockerfiles) — promote HIGH only once BOTH land (or the pebble CVEs get
-  # documented exceptions), otherwise the gate surprise-fails. Exceptions live in
-  # .github/trivyignore
-  # (id + justification + owner + date); the gate is otherwise non-negotiable.
+  # Wave 5d-h: Trivy CVE scan — a BLOCKING gate. Policy: fail on CRITICAL,HIGH with an
+  # available fix (ignore-unfixed: true — unfixed base-image CVEs must not block
+  # forever). HIGH was promoted on 2026-07-06 after the Spring Boot 3.5.16 bump
+  # (PRs #25-#29) cleared the 6 waived Spring/Tomcat CRITICALs and all 22 Spring HIGHs:
+  # rebuilt images carry 0 CRITICAL and 0 HIGH in Java deps and OS packages. The only
+  # remaining HIGHs are 7 CVEs in the pebble binary of the eclipse-temurin:21-jre base,
+  # carried as documented exceptions in .github/trivyignore (id + justification + owner
+  # + removal condition); the gate is otherwise non-negotiable.
   # Two scans on purpose: trivy-action drops the severity filter when format=sarif,
   # so a single SARIF run with exit-code 1 would block on ANY severity. The SARIF
   # report stays UNFILTERED (no ignorefile — the Security tab shows the full truth);
@@ -234,14 +232,14 @@ jobs:
           category: trivy-image-${{ matrix.service }}
       # Runs after the SARIF upload so the report lands even when the gate is red.
       # Reuses the trivy CLI + vuln DB installed by the report scan above.
-      - name: Trivy CVE gate (BLOCKING, CRITICAL with fix available)
+      - name: Trivy CVE gate (BLOCKING, CRITICAL+HIGH with fix available)
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0 (verified-safe re-release)
         with:
           scan-type: image
           image-ref: scan/${{ matrix.service }}-service:ci
           format: table
           exit-code: '1'
-          severity: CRITICAL
+          severity: CRITICAL,HIGH
           ignore-unfixed: true
           trivyignores: .github/trivyignore
           skip-setup-trivy: true
