@@ -30,10 +30,10 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(CartController.class)
@@ -48,7 +48,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class CartControllerWebTest {
 
   @Autowired private MockMvc mockMvc;
-  @MockBean private CartService cartService;
+  @MockitoBean private CartService cartService;
 
   private static final String USER_7 = TestJwt.bearer(TestJwt.token("7", List.of("USER")));
   private static final String USER_8 = TestJwt.bearer(TestJwt.token("8", List.of("USER")));
