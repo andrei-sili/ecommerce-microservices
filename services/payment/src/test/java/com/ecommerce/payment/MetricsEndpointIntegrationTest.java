@@ -14,10 +14,10 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -39,8 +39,8 @@ class MetricsEndpointIntegrationTest extends AbstractIntegrationTest {
 
   // Mocked only to keep context loading identical to the business tests (no broker, no outbound
   // HTTP). This test exercises neither — the security chain is fully real.
-  @MockBean private OutboxRelay outboxRelay;
-  @MockBean private OrderClient orderClient;
+  @MockitoBean private OutboxRelay outboxRelay;
+  @MockitoBean private OrderClient orderClient;
 
   @Test
   void prometheusEndpoint_noAuthHeader_returns200_textPlain_withMetrics() throws Exception {

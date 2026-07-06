@@ -29,8 +29,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -56,8 +56,8 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   @Autowired private PaymentTransactionRepository transactionRepository;
   @Autowired private ProcessedWebhookEventRepository webhookEventRepository;
 
-  @MockBean private OrderClient orderClient;
-  @MockBean private OutboxRelay outboxRelay;
+  @MockitoBean private OrderClient orderClient;
+  @MockitoBean private OutboxRelay outboxRelay;
 
   @BeforeEach
   void cleanDb() {

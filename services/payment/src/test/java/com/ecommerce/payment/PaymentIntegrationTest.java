@@ -37,9 +37,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.mock.mockito.SpyBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 class PaymentIntegrationTest extends AbstractIntegrationTest {
@@ -60,11 +60,11 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   @Autowired private ProcessedWebhookEventRepository webhookEventRepository;
 
   // Mocked so no RabbitMQ connection is needed; we verify the outbox DB rows instead.
-  @MockBean private OutboxRelay outboxRelay;
-  @MockBean private OrderClient orderClient;
+  @MockitoBean private OutboxRelay outboxRelay;
+  @MockitoBean private OrderClient orderClient;
 
   // Real by default (writes outbox rows); stubbed to throw only in the atomicity test.
-  @SpyBean private OutboxService outboxService;
+  @MockitoSpyBean private OutboxService outboxService;
 
   @BeforeEach
   void cleanDb() {

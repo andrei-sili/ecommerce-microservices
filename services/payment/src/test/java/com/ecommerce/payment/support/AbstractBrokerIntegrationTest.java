@@ -10,8 +10,8 @@ import org.testcontainers.utility.DockerImageName;
 
 /**
  * Extends the Postgres-backed base with a REAL RabbitMQ broker (Testcontainers) so the outbox relay
- * is exercised with ZERO broker mocks. Concrete subclasses do NOT {@code @MockBean OutboxRelay} —
- * they drive the real relay against the real broker and assert row state + delivery.
+ * is exercised with ZERO broker mocks. Concrete subclasses do NOT {@code @MockitoBean OutboxRelay}
+ * — they drive the real relay against the real broker and assert row state + delivery.
  *
  * <p>{@code publisher-confirm-type: correlated} + {@code publisher-returns: true} are sourced from
  * the test {@code application.yml} (mirroring production), so reverting either one there turns the
