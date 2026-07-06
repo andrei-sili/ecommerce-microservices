@@ -13,7 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * Fast, broker-free checks for the relay's skip branches (no publish is attempted, so a mocked
@@ -29,7 +29,7 @@ class OutboxRelayTest extends AbstractIntegrationTest {
   @Autowired private OrderRepository orderRepository;
 
   // Mocked so no real AMQP connection is attempted; these paths must never touch the broker.
-  @MockBean private RabbitTemplate rabbitTemplate;
+  @MockitoBean private RabbitTemplate rabbitTemplate;
 
   @BeforeEach
   void cleanDb() {

@@ -28,7 +28,7 @@ import org.mockito.MockitoAnnotations;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
  * Integration tests for {@link PaymentEventConsumer}: handler logic against a real PostgreSQL DB.
@@ -45,7 +45,7 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   @Autowired private OutboxEventRepository outboxEventRepository;
 
   // Mocked so tests can control commit/release outcomes.
-  @MockBean private ProductReservationClient reservationClient;
+  @MockitoBean private ProductReservationClient reservationClient;
 
   @Mock private Channel channel;
 
