@@ -2,13 +2,14 @@ package com.ecommerce.payment.config;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.web.client.ClientHttpRequestFactories;
-import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.boot.web.client.RestClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.client.ClientHttpRequestFactory;
 
 /**
  * Shared client infrastructure. {@link com.ecommerce.payment.client.OrderClient} is a
@@ -27,9 +28,11 @@ public class ClientsConfig {
   @Order(Ordered.HIGHEST_PRECEDENCE)
   public RestClientCustomizer timeoutRestClientCustomizer(ClientsProperties properties) {
     ClientHttpRequestFactorySettings settings =
-        ClientHttpRequestFactorySettings.DEFAULTS
+        ClientHttpRequestFactorySettings.defaults()
             .withConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
-    return builder -> builder.requestFactory(ClientHttpRequestFactories.get(settings));
+    ClientHttpRequestFactory requestFactory =
+        ClientHttpRequestFactoryBuilder.detect().build(settings);
+    return builder -> builder.requestFactory(requestFactory);
   }
 }
