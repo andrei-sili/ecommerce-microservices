@@ -13,7 +13,7 @@
 # We cannot patch a Go binary baked into the base image; the fix must arrive as a
 # temurin base refresh built with the fixed Go toolchain/modules. Owner: devops.
 #
-# REMOVAL CONDITION: delete all seven entries as soon as a temurin base refresh ships
+# REMOVAL CONDITION: delete all eight entries as soon as a temurin base refresh ships
 # a fixed pebble. Watchdog: the weekly scheduled-image-scan workflow runs report-only
 # with NO ignorefile, so these findings stay visible there week over week; re-check
 # this block on every base-image refresh.
