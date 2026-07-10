@@ -8,12 +8,12 @@
 # waived Spring/Tomcat CRITICALs, so those entries are gone. The rebuilt images carry
 # 0 CRITICAL and 0 HIGH in our Java dependencies and OS packages.
 #
-# The seven HIGHs below all live in the /usr/bin/pebble Go binary shipped inside the
+# The eight HIGHs below all live in the /usr/bin/pebble Go binary shipped inside the
 # CURRENT eclipse-temurin:21-jre base image — not in our code or our dependencies.
 # We cannot patch a Go binary baked into the base image; the fix must arrive as a
 # temurin base refresh built with the fixed Go toolchain/modules. Owner: devops.
 #
-# REMOVAL CONDITION: delete all seven entries as soon as a temurin base refresh ships
+# REMOVAL CONDITION: delete all eight entries as soon as a temurin base refresh ships
 # a fixed pebble. Watchdog: the weekly scheduled-image-scan workflow runs report-only
 # with NO ignorefile, so these findings stay visible there week over week; re-check
 # this block on every base-image refresh.
@@ -27,6 +27,8 @@ CVE-2026-42502
 # pebble: Go stdlib 1.26.3 — fixed upstream in Go 1.26.4. devops. 2026-07-06
 CVE-2026-27145
 CVE-2026-42504
+# pebble: Go stdlib 1.26.3 — CVE-2026-39822 (os.Root symlink following) fixed upstream in Go 1.26.5. devops. 2026-07-10
+CVE-2026-39822
 
 # ---- K8s misconfig gate (severity CRITICAL,HIGH on hand-written manifests) ---------
 # Both checks fire on every workload we ship and need RUNTIME changes (readOnly root
