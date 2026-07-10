@@ -1,104 +1,149 @@
 package com.ecommerce.payment;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.matching;
+import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ecommerce.payment.client.OrderClient;
 import com.ecommerce.payment.client.OrderView;
+import com.ecommerce.payment.exception.ApiException;
+import com.ecommerce.payment.relay.OutboxRelay;
+import com.ecommerce.payment.support.AbstractIntegrationTest;
+import com.ecommerce.payment.support.TestJwt;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import java.util.List;
 import java.util.UUID;
-import org.hamcrest.Matchers;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
- * Wire test: verifies the auto-configured RestClient.Builder (Boot's bean, SNAKE_CASE ObjectMapper)
- * is used by OrderClient. @RestClientTest wires Boot's Jackson auto-config (including
- * property-naming-strategy: SNAKE_CASE from test application.yml) and a MockRestServiceServer bound
- * to the RestClient.Builder. If someone accidentally replaced the Boot builder with the static
- * RestClient.builder(), snake_case fields like order_id → orderId would break (the
- * restclient-snakecase-gotcha produced a 400 in Wave 2 for exactly this reason).
+ * Non-mocked HTTP seam test for the Payment -> Order call. The client under test is the REAL {@link
+ * OrderClient} bean, wired by Boot exactly as in production: the auto-configured {@code
+ * RestClient.Builder} (SNAKE_CASE ObjectMapper from application.yml) plus the {@code
+ * timeoutRestClientCustomizer}. Requests cross a real socket to a WireMock stand-in that speaks the
+ * real Order Service wire shape.
  *
- * <p>Also verifies that OrderClient always sends {@code Authorization: Bearer <token>}: passing the
- * raw token (as CurrentUser.bearerToken() yields) and asserting the outgoing header has the prefix
- * ensures the Bearer-prefix bug (fix #1, Wave 3) can never regress silently.
+ * <p>Because the client is Boot-wired (never hand-built), this doubles as the
+ * restclient-snakecase-gotcha regression guard: if {@code OrderClient} regressed to the static
+ * {@code RestClient.builder()} or SNAKE_CASE were dropped from {@code application.yml}, {@code
+ * userId} would stop binding from {@code user_id} and the happy-path assertion would turn RED. The
+ * transport-less {@code MockRestServiceServer} test this replaces could not catch that (it stubbed
+ * the JSON itself) — and it hid the {@code id}-vs-{@code order_id} wire-mapping bug this test also
+ * pins via {@code orderId()}.
  */
-@RestClientTest(OrderClient.class)
-@TestPropertySource(
-    properties = {
-      "clients.order.base-url=http://order-service",
-      "clients.connect-timeout-ms=2000",
-      "clients.read-timeout-ms=5000",
-      "spring.jackson.property-naming-strategy=SNAKE_CASE"
-    })
-class OrderClientWireTest {
+class OrderClientWireTest extends AbstractIntegrationTest {
+
+  /**
+   * Real Order Service wire shape (api_contracts.md): the identifier is {@code id} (NOT {@code
+   * order_id}), the rest snake_case, plus fields OrderView deliberately ignores (items, subtotal,
+   * timestamps) — proving the client tolerates the full payload the way Boot's ObjectMapper does.
+   */
+  private static final String ORDER_JSON =
+      """
+      {"id":"%s","user_id":7,"status":"PENDING","currency":"EUR",\
+      "items":[{"product_id":42,"product_name":"Black T-Shirt","unit_price":19.99,\
+      "quantity":2,"line_total":39.98}],"subtotal":39.98,"total":39.98,\
+      "created_at":"2026-06-25T10:30:00Z","updated_at":"2026-06-25T10:30:00Z"}
+      """;
+
+  private static WireMockServer orderService;
+
+  // Mocked so context load matches the business tests (no broker); this test exercises only the
+  // seam.
+  @MockitoBean private OutboxRelay outboxRelay;
 
   @Autowired private OrderClient orderClient;
 
-  @Autowired private MockRestServiceServer server;
-
-  private static final String RAW_TOKEN = "eyJhbGciOiJIUzI1NiJ9.test";
-
-  private static final String ORDER_RESPONSE_TEMPLATE =
-      """
-      {"order_id":"%s","user_id":7,"status":"PENDING","currency":"EUR",\
-      "total":39.98,"subtotal":39.98}
-      """;
-
-  @Test
-  void getOrder_deserializesSnakeCaseResponse_correctly() {
-    UUID orderId = UUID.randomUUID();
-
-    server
-        .expect(requestTo(Matchers.containsString("/api/v1/orders/" + orderId)))
-        .andExpect(method(HttpMethod.GET))
-        .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + RAW_TOKEN))
-        .andRespond(
-            withSuccess(ORDER_RESPONSE_TEMPLATE.formatted(orderId), MediaType.APPLICATION_JSON));
-
-    // Pass the RAW token (what CurrentUser.bearerToken() actually yields — no prefix).
-    // OrderClient must add the "Bearer " prefix before sending.
-    OrderView view = orderClient.getOrder(orderId, RAW_TOKEN);
-
-    // These assertions prove snake_case deserialization works via Boot's SNAKE_CASE ObjectMapper:
-    // "user_id" → userId, "order_id" → orderId. Without the Boot-configured builder these fail.
-    assertThat(view).isNotNull();
-    assertThat(view.userId()).isEqualTo(7L);
-    assertThat(view.orderId()).isEqualTo(orderId);
-    assertThat(view.total()).isEqualByComparingTo("39.98");
-    assertThat(view.currency()).isEqualTo("EUR");
-    assertThat(view.status()).isEqualTo("PENDING");
-
-    server.verify();
+  @BeforeAll
+  static void startOrderStub() {
+    orderService = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    orderService.start();
   }
 
-  /**
-   * Verifies that OrderClient always adds the {@code Bearer } prefix to the outgoing Authorization
-   * header regardless of what the caller passes. Prevents the Wave 3 regression where a raw token
-   * (no prefix) was forwarded and Order Service returned 401 / 404 for every createPayment call.
-   */
+  @AfterAll
+  static void stopOrderStub() {
+    if (orderService != null) {
+      orderService.stop();
+    }
+  }
+
+  @BeforeEach
+  void resetStubs() {
+    orderService.resetAll();
+  }
+
+  @DynamicPropertySource
+  static void orderClientBaseUrl(DynamicPropertyRegistry registry) {
+    // Lazy supplier: resolved at context refresh, after @BeforeAll has started the stub.
+    registry.add("clients.order.base-url", () -> orderService.baseUrl());
+  }
+
+  private static String rawUserToken() {
+    return TestJwt.token("7", List.of("USER"));
+  }
+
   @Test
-  void getOrder_rawToken_outgoingHeaderHasBearerPrefix() {
+  void getOrder_realWire_parsesSnakeCaseAndBindsIdToOrderId() {
     UUID orderId = UUID.randomUUID();
+    orderService.stubFor(
+        get(urlEqualTo("/api/v1/orders/" + orderId))
+            .willReturn(okJson(ORDER_JSON.formatted(orderId))));
 
-    server
-        .expect(requestTo(Matchers.containsString("/api/v1/orders/" + orderId)))
-        .andExpect(method(HttpMethod.GET))
-        // The outgoing header MUST be "Bearer <rawToken>", not just the raw token.
-        .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + RAW_TOKEN))
-        .andRespond(
-            withSuccess(ORDER_RESPONSE_TEMPLATE.formatted(orderId), MediaType.APPLICATION_JSON));
+    OrderView view = orderClient.getOrder(orderId, rawUserToken());
 
-    orderClient.getOrder(orderId, RAW_TOKEN);
+    // Binds from the real wire key "id" (was null before @JsonProperty("id")): the id-mapping
+    // guard.
+    assertThat(view.orderId()).isEqualTo(orderId);
+    // Binds from "user_id": the SNAKE_CASE / Boot-wired-builder guard.
+    assertThat(view.userId()).isEqualTo(7L);
+    assertThat(view.status()).isEqualTo("PENDING");
+    assertThat(view.total()).isEqualByComparingTo("39.98");
+    assertThat(view.currency()).isEqualTo("EUR");
+  }
 
-    server.verify();
+  @Test
+  void getOrder_forwardsCallersBearerToken() {
+    UUID orderId = UUID.randomUUID();
+    orderService.stubFor(
+        get(urlEqualTo("/api/v1/orders/" + orderId))
+            .willReturn(okJson(ORDER_JSON.formatted(orderId))));
+    String rawToken = rawUserToken();
+
+    orderClient.getOrder(orderId, rawToken);
+
+    // Assert the emitted value, not just presence: a missing "Bearer " prefix/space must fail.
+    orderService.verify(
+        getRequestedFor(urlEqualTo("/api/v1/orders/" + orderId))
+            .withHeader("Authorization", matching("^Bearer .+$"))
+            .withHeader("Authorization", equalTo("Bearer " + rawToken)));
+  }
+
+  @Test
+  void getOrder_notFound_mapsToOrderNotFound() {
+    UUID orderId = UUID.randomUUID();
+    orderService.stubFor(
+        get(urlEqualTo("/api/v1/orders/" + orderId)).willReturn(aResponse().withStatus(404)));
+
+    assertThatThrownBy(() -> orderClient.getOrder(orderId, rawUserToken()))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            ex -> {
+              assertThat(ex.getStatus()).isEqualTo(HttpStatus.NOT_FOUND);
+              assertThat(ex.getCode()).isEqualTo("ORDER_NOT_FOUND");
+            });
   }
 }
