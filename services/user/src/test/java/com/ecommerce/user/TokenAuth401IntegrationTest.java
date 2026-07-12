@@ -32,10 +32,11 @@ import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Pins the HTTP-level {@code 401} contract of the JWT security filter chain on {@code GET
- * /api/v1/users/me}: an expired token and every non-{@code Bearer} auth scheme are rejected with
- * the standard four-field error envelope. Exercises the REAL {@code FilterChainProxy} (no mocked
- * security beans, no auth request post-processors) so a regression in scheme parsing, expiry
- * enforcement, or envelope rendering turns this suite red.
+ * /api/v1/users/me}: a missing header, every non-{@code Bearer} auth scheme, a malformed token, a
+ * tampered signature, and an expired token are all rejected with the standard four-field error
+ * envelope — with the exact same key-set, so the cause never leaks. Exercises the REAL {@code
+ * FilterChainProxy} (no mocked security beans, no auth request post-processors) so a regression in
+ * scheme parsing, expiry enforcement, or envelope rendering turns this suite red.
  */
 @AutoConfigureMockMvc
 class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
@@ -103,6 +104,34 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
         mockMvc.perform(get(PROFILE_PATH).header("Authorization", headerValue)));
   }
 
+  /**
+   * No {@code Authorization} header at all — the filter never authenticates, entry point renders.
+   */
+  @Test
+  void missingAuthorizationHeader_returns401WithStandardEnvelope() throws Exception {
+    expectUnauthorizedEnvelope(mockMvc.perform(get(PROFILE_PATH)));
+  }
+
+  /** Correct {@code Bearer} scheme but a token that is not a parseable JWT. */
+  @Test
+  void malformedBearerToken_returns401WithStandardEnvelope() throws Exception {
+    expectUnauthorizedEnvelope(
+        mockMvc.perform(get(PROFILE_PATH).header("Authorization", "Bearer not.a.jwt")));
+  }
+
+  /**
+   * A structurally valid, correctly-signed token whose signature is then corrupted — proves expiry
+   * is not the only validation the filter enforces (signature verification also gates access).
+   */
+  @Test
+  void bearerTokenWithTamperedSignature_returns401WithStandardEnvelope() throws Exception {
+    long userId = registerUser("tampered@example.com", "Tampered");
+    String tampered = tamperSignature(mintValidToken(userId));
+
+    expectUnauthorizedEnvelope(
+        mockMvc.perform(get(PROFILE_PATH).header("Authorization", "Bearer " + tampered)));
+  }
+
   private void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
     MvcResult result =
         actions
@@ -140,6 +169,18 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
             jwtProperties.refreshTokenTtlSeconds(),
             jwtProperties.issuer());
     return new JwtService(expiredProps).issueAccessToken(userId, Set.of("USER"));
+  }
+
+  private static String tamperSignature(String token) {
+    // Flip one char in the MIDDLE of the signature segment. A mid-segment base64url char carries
+    // all
+    // six significant bits, so the decoded signature bytes are guaranteed to change → HMAC
+    // verification fails deterministically. (The trailing char's low bits are "don't care", so a
+    // naive last-char flip could decode to the same bytes and still verify — hence the middle.)
+    int sigStart = token.lastIndexOf('.') + 1;
+    int idx = (sigStart + token.length()) / 2;
+    char flipped = token.charAt(idx) == 'A' ? 'B' : 'A';
+    return token.substring(0, idx) + flipped + token.substring(idx + 1);
   }
 
   private long registerUser(String email, String name) throws Exception {
