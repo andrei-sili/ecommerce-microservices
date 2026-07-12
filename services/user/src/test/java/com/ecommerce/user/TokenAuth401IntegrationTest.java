@@ -2,6 +2,7 @@ package com.ecommerce.user;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -16,6 +17,7 @@ import com.ecommerce.user.security.JwtService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -110,12 +112,19 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(PROFILE_PATH)))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.fields").doesNotExist())
             .andReturn();
 
-    // timestamp must be a parseable ISO-8601 instant (throws otherwise).
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    // timestamp must be a parseable ISO-8601 instant (throws otherwise).
     Instant.parse(body.get("timestamp").asText());
+    // Exact key-set: the four causes (missing / non-Bearer / malformed / expired) must be
+    // indistinguishable — no extension field may leak which one occurred.
+    Set<String> keys = new HashSet<>();
+    body.fieldNames().forEachRemaining(keys::add);
+    assertEquals(
+        Set.of("error", "message", "timestamp", "path"),
+        keys,
+        "401 envelope must expose exactly the four contract keys");
   }
 
   private String mintValidToken(long userId) {
