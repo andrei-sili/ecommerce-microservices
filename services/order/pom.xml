@@ -115,6 +115,13 @@
       <artifactId>rabbitmq</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Real HTTP stand-in for the Cart/Product seams (clients over a socket, never mocked) -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <version>3.9.2</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <dependencyManagement>
