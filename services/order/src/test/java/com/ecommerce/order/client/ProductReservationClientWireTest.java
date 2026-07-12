@@ -1,100 +1,104 @@
 package com.ecommerce.order.client;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.delete;
+import static com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
+import static com.github.tomakehurst.wiremock.client.WireMock.notMatching;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ecommerce.order.config.ClientsProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ecommerce.order.exception.InsufficientStockException;
+import com.ecommerce.order.exception.UpstreamServiceException;
+import com.ecommerce.order.support.AbstractIntegrationTest;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.http.Fault;
 import java.util.List;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
-import org.springframework.boot.autoconfigure.http.HttpMessageConvertersAutoConfiguration;
-import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
-import org.springframework.boot.autoconfigure.web.client.RestClientAutoConfiguration;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.test.context.TestPropertySource;
-import org.springframework.test.web.client.MockRestServiceServer;
-import org.springframework.web.client.RestClient;
+import org.springframework.http.HttpStatus;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Exercises REAL HTTP serialization through {@link ProductReservationClient} (no client mocking),
- * built from Boot's auto-configured {@code RestClient.Builder} — the same converters/ObjectMapper
- * production uses. Guards the snake_case wire contract in both directions: a mock hid this once and
- * the static {@code RestClient.builder()} (default camelCase mapper) caused a live 502 from
- * product-service.
+ * Non-mocked HTTP seam test for the Order -> Product reservation calls (reserve + release). The
+ * client under test is the REAL {@link ProductReservationClient} bean, Boot-wired exactly as in
+ * production, exercised over a real socket against a WireMock stand-in speaking the contract wire
+ * shape. This is the guard the transport-less {@code MockRestServiceServer} predecessor could not
+ * be: the outbound snake_case body, the {@code X-Internal-Api-Key} header, and the upstream
+ * status-to-exception mapping are all verified against real wire behavior.
  */
-@SpringBootTest(classes = ProductReservationClientWireTest.Config.class)
-@TestPropertySource(properties = "spring.jackson.property-naming-strategy=SNAKE_CASE")
-class ProductReservationClientWireTest {
+class ProductReservationClientWireTest extends AbstractIntegrationTest {
 
-  @Configuration
-  @ImportAutoConfiguration({
-    JacksonAutoConfiguration.class,
-    HttpMessageConvertersAutoConfiguration.class,
-    RestClientAutoConfiguration.class
-  })
-  static class Config {}
+  private static final UUID ORDER_ID = UUID.fromString("9f1c2e7a-0000-0000-0000-000000000001");
+  private static final String RESERVATIONS_URL = "/api/v1/inventory/reservations";
 
-  // Boot's auto-configured builder: carries the snake_case ObjectMapper converter (same as prod).
-  @Autowired private RestClient.Builder builder;
-  @Autowired private ObjectMapper objectMapper;
+  /**
+   * 201 reserve response from api_contracts.md, verbatim snake_case with the full payload (product
+   * name, per-line currency, line_total) — the client must bind these into the camelCase record.
+   */
+  private static final String RESERVED_JSON =
+      """
+      {"order_id":"9f1c2e7a-0000-0000-0000-000000000001","status":"RESERVED",\
+      "items":[{"product_id":42,"name":"Black T-Shirt","unit_price":19.99,\
+      "currency":"EUR","quantity":2,"line_total":39.98}],\
+      "currency":"EUR","subtotal":39.98}
+      """;
+
+  private static WireMockServer productService;
+
+  @Autowired private ProductReservationClient reservationClient;
+
+  @BeforeAll
+  static void startProductStub() {
+    productService = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    productService.start();
+  }
+
+  @AfterAll
+  static void stopProductStub() {
+    if (productService != null) {
+      productService.stop();
+    }
+  }
+
+  @BeforeEach
+  void resetStubs() {
+    productService.resetAll();
+  }
+
+  @DynamicPropertySource
+  static void productBaseUrl(DynamicPropertyRegistry registry) {
+    // Lazy supplier: resolved at context refresh, after @BeforeAll has started the stub.
+    registry.add("clients.product.base-url", () -> productService.baseUrl());
+  }
+
+  private static ReservationRequest oneLine() {
+    return new ReservationRequest(ORDER_ID, List.of(new ReservationRequest.Line(42L, 2)));
+  }
 
   @Test
-  void reservationRequest_serializesSnakeCase_and_responseDeserializesPopulated() {
-    RestClient.Builder clientBuilder = builder.clone().baseUrl("http://product.test");
-    MockRestServiceServer server = MockRestServiceServer.bindTo(clientBuilder).build();
-    RestClient restClient = clientBuilder.build();
+  void reserve_realWire_serializesSnakeCaseBody_andParsesResponse() {
+    productService.stubFor(
+        post(urlEqualTo(RESERVATIONS_URL))
+            .willReturn(
+                aResponse()
+                    .withStatus(201)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(RESERVED_JSON)));
 
-    ClientsProperties props = new ClientsProperties();
-    props.getProduct().setBaseUrl("http://product.test");
-    props.getProduct().setInternalApiKey("test-internal-api-key");
-    ProductReservationClient reservationClient =
-        new ProductReservationClient(restClient, props, objectMapper);
+    ReservationResponse response = reservationClient.reserve(ORDER_ID, oneLine());
 
-    UUID orderId = UUID.fromString("9f1c2e7a-0000-0000-0000-000000000001");
-    String snakeResponse =
-        """
-        {
-          "order_id": "9f1c2e7a-0000-0000-0000-000000000001",
-          "status": "RESERVED",
-          "items": [
-            { "product_id": 42, "name": "Black T-Shirt", "unit_price": 19.99,
-              "currency": "EUR", "quantity": 2, "line_total": 39.98 }
-          ],
-          "currency": "EUR",
-          "subtotal": 39.98
-        }
-        """;
-
-    server
-        .expect(requestTo("http://product.test/api/v1/inventory/reservations"))
-        .andExpect(method(HttpMethod.POST))
-        .andExpect(header("X-Internal-Api-Key", "test-internal-api-key"))
-        // Outgoing body MUST be snake_case per the contract: order_id / items[].product_id.
-        .andExpect(jsonPath("$.order_id").value("9f1c2e7a-0000-0000-0000-000000000001"))
-        .andExpect(jsonPath("$.items[0].product_id").value(42))
-        .andExpect(jsonPath("$.items[0].quantity").value(2))
-        // The camelCase keys must NOT be present on the wire.
-        .andExpect(jsonPath("$.orderId").doesNotExist())
-        .andExpect(jsonPath("$.items[0].productId").doesNotExist())
-        .andRespond(withSuccess(snakeResponse, MediaType.APPLICATION_JSON));
-
-    ReservationRequest request =
-        new ReservationRequest(orderId, List.of(new ReservationRequest.Line(42L, 2)));
-    ReservationResponse response = reservationClient.reserve(orderId, request);
-
-    server.verify();
-    // Response (snake_case) must populate the camelCase record fields — not null them out.
-    assertThat(response.orderId()).isEqualTo(orderId);
+    assertThat(response.orderId()).isEqualTo(ORDER_ID);
     assertThat(response.status()).isEqualTo("RESERVED");
     assertThat(response.currency()).isEqualTo("EUR");
     assertThat(response.subtotal()).isEqualByComparingTo("39.98");
@@ -106,5 +110,99 @@ class ProductReservationClientWireTest {
     assertThat(item.currency()).isEqualTo("EUR");
     assertThat(item.quantity()).isEqualTo(2);
     assertThat(item.lineTotal()).isEqualByComparingTo("39.98");
+
+    // Outbound body MUST be snake_case (contract) and carry the internal system key.
+    productService.verify(
+        postRequestedFor(urlEqualTo(RESERVATIONS_URL))
+            .withHeader("X-Internal-Api-Key", equalTo("test-internal-api-key"))
+            .withRequestBody(matchingJsonPath("$.order_id", equalTo(ORDER_ID.toString())))
+            .withRequestBody(matchingJsonPath("$.items[0].product_id", equalTo("42")))
+            .withRequestBody(matchingJsonPath("$.items[0].quantity", equalTo("2")))
+            // The camelCase keys must NOT appear on the wire.
+            .withRequestBody(notMatching("(?s).*\"orderId\".*"))
+            .withRequestBody(notMatching("(?s).*\"productId\".*")));
+  }
+
+  @Test
+  void reserve_conflict_mapsToInsufficientStockWithProductId() {
+    String body =
+        """
+        {"error":"INSUFFICIENT_STOCK","message":"Only 1 left of Black T-Shirt",\
+        "product_id":42,"timestamp":"2026-06-25T10:30:00Z",\
+        "path":"/api/v1/inventory/reservations"}
+        """;
+    productService.stubFor(
+        post(urlEqualTo(RESERVATIONS_URL))
+            .willReturn(
+                aResponse()
+                    .withStatus(409)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(body)));
+
+    assertThatThrownBy(() -> reservationClient.reserve(ORDER_ID, oneLine()))
+        .isInstanceOfSatisfying(
+            InsufficientStockException.class,
+            ex -> {
+              assertThat(ex.getProductId()).isEqualTo(42L);
+              assertThat(ex.getMessage()).isEqualTo("Only 1 left of Black T-Shirt");
+            });
+  }
+
+  @Test
+  void reserve_unprocessable_mapsToReservationRejectedWithRelayedCode() {
+    String body =
+        """
+        {"error":"MIXED_CURRENCY_CART","message":"All lines must share one currency"}
+        """;
+    productService.stubFor(
+        post(urlEqualTo(RESERVATIONS_URL))
+            .willReturn(
+                aResponse()
+                    .withStatus(422)
+                    .withHeader("Content-Type", "application/json")
+                    .withBody(body)));
+
+    assertThatThrownBy(() -> reservationClient.reserve(ORDER_ID, oneLine()))
+        .isInstanceOfSatisfying(
+            ProductReservationClient.ReservationRejectedException.class,
+            ex -> {
+              assertThat(ex.getStatus()).isEqualTo(HttpStatus.UNPROCESSABLE_ENTITY);
+              assertThat(ex.getCode()).isEqualTo("MIXED_CURRENCY_CART");
+              assertThat(ex.getMessage()).isEqualTo("All lines must share one currency");
+            });
+  }
+
+  @Test
+  void reserve_serverError_mapsToUpstreamServiceException() {
+    productService.stubFor(
+        post(urlEqualTo(RESERVATIONS_URL)).willReturn(aResponse().withStatus(500)));
+
+    assertThatThrownBy(() -> reservationClient.reserve(ORDER_ID, oneLine()))
+        .isInstanceOf(UpstreamServiceException.class)
+        .hasMessage("Product reservation failed");
+  }
+
+  @Test
+  void release_realWire_sendsInternalKey_andAccepts204() {
+    productService.stubFor(
+        delete(urlEqualTo(RESERVATIONS_URL + "/" + ORDER_ID))
+            .willReturn(aResponse().withStatus(204)));
+
+    reservationClient.release(ORDER_ID); // must not throw
+
+    productService.verify(
+        deleteRequestedFor(urlEqualTo(RESERVATIONS_URL + "/" + ORDER_ID))
+            .withHeader("X-Internal-Api-Key", equalTo("test-internal-api-key")));
+  }
+
+  @Test
+  void release_connectionFault_mapsToUpstreamServiceException() {
+    productService.stubFor(
+        delete(urlEqualTo(RESERVATIONS_URL + "/" + ORDER_ID))
+            .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+
+    assertThatThrownBy(() -> reservationClient.release(ORDER_ID))
+        .isInstanceOf(UpstreamServiceException.class)
+        .hasMessage("Product service is unavailable");
   }
 }
