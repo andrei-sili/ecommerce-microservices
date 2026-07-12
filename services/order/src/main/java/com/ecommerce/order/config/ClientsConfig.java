@@ -1,5 +1,6 @@
 package com.ecommerce.order.config;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
@@ -27,6 +28,13 @@ public class ClientsConfig {
    * {@code .requestFactory(...)} call on a derived client) so it composes with Boot's other builder
    * customizers instead of replacing the factory they set. Ordered first so any later customizer
    * that swaps the request factory still wins. A slow upstream cannot hang Order.
+   *
+   * <p>The JDK {@link HttpClient} is pinned to HTTP/1.1. {@code detect()} would pick the same JDK
+   * client, but it defaults to HTTP/2 and, over cleartext {@code http://}, attempts an h2c upgrade
+   * that breaks a POST carrying a request body when the response also has one — Order's exact
+   * reserve/reprice call ({@code POST /inventory/reservations} → {@code 201} body) fails with
+   * {@code EOFException: EOF reached while reading}. Internal service-to-service traffic is plain
+   * HTTP/1.1, so pinning it is both the fix and the correct transport (no h2c gamble).
    */
   @Bean
   @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -36,7 +44,9 @@ public class ClientsConfig {
             .withConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
     ClientHttpRequestFactory requestFactory =
-        ClientHttpRequestFactoryBuilder.detect().build(settings);
+        ClientHttpRequestFactoryBuilder.jdk()
+            .withHttpClientCustomizer(builder -> builder.version(HttpClient.Version.HTTP_1_1))
+            .build(settings);
     return builder -> builder.requestFactory(requestFactory);
   }
 }
