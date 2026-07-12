@@ -19,6 +19,8 @@ import java.time.Instant;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -75,6 +77,28 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
     expectUnauthorizedEnvelope(
         mockMvc.perform(
             get(PROFILE_PATH).header("Authorization", "Bearer " + mintExpiredToken(userId))));
+  }
+
+  /**
+   * Every case carries a fully VALID token — only the scheme is wrong — so this pins scheme
+   * matching, not token validity. {@code bearer} (lowercase) and {@code Bearer}-glued are
+   * deliberate: the contract mandates the strict, case-sensitive {@code "Bearer "} prefix.
+   */
+  @ParameterizedTest(name = "{0}")
+  @CsvSource({
+    "Basic scheme,Basic dXNlcjpwYXNz",
+    "Token scheme,Token {token}",
+    "lowercase bearer scheme,bearer {token}",
+    "Bearer glued to token,Bearer{token}",
+    "raw token without scheme,{token}"
+  })
+  void nonBearerScheme_returns401WithStandardEnvelope(String label, String headerTemplate)
+      throws Exception {
+    long userId = registerUser("scheme@example.com", "Scheme");
+    String headerValue = headerTemplate.replace("{token}", mintValidToken(userId));
+
+    expectUnauthorizedEnvelope(
+        mockMvc.perform(get(PROFILE_PATH).header("Authorization", headerValue)));
   }
 
   private void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
