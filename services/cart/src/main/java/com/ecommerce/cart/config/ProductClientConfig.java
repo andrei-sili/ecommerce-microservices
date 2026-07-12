@@ -1,8 +1,8 @@
 package com.ecommerce.cart.config;
 
 import java.time.Duration;
-import org.springframework.boot.web.client.ClientHttpRequestFactories;
-import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
+import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -14,12 +14,12 @@ public class ProductClientConfig {
   @Bean
   public RestClient productRestClient(ProductClientProperties properties) {
     ClientHttpRequestFactorySettings settings =
-        ClientHttpRequestFactorySettings.DEFAULTS
+        ClientHttpRequestFactorySettings.defaults()
             .withConnectTimeout(Duration.ofMillis(properties.connectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));
     return RestClient.builder()
         .baseUrl(properties.baseUrl())
-        .requestFactory(ClientHttpRequestFactories.get(settings))
+        .requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings))
         .build();
   }
 }
