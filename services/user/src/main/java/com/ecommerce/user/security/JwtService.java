@@ -8,6 +8,7 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.LocatorAdapter;
+import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -111,12 +112,22 @@ public class JwtService {
     Jws<Claims> jws = parser.parseSignedClaims(token);
     JwsHeader header = jws.getHeader();
     Claims claims = jws.getPayload();
-    recordAcceptance(header.getAlgorithm(), header.getKeyId());
 
     Long userId = Long.valueOf(claims.getSubject());
     @SuppressWarnings("unchecked")
     List<String> roles = claims.get("roles", List.class);
-    return new AuthenticatedUser(userId, roles == null ? Set.of() : Set.copyOf(roles));
+    // A signed-but-malformed roles claim (e.g. "roles":[null]) is a broken token, not an empty role
+    // set: reject it as 401 (fail-closed) instead of letting Set.copyOf NPE escape the filter's
+    // JwtException catch into a non-contract 500.
+    if (roles != null && roles.stream().anyMatch(r -> r == null)) {
+      throw new MalformedJwtException("Malformed roles claim");
+    }
+    Set<String> roleSet = roles == null ? Set.of() : Set.copyOf(roles);
+
+    // Record acceptance only after the token FULLY validates — a token that 401s must not move the
+    // counter or emit an audit line (the phase-3 contraction gate reads exactly that signal).
+    recordAcceptance(header.getAlgorithm(), header.getKeyId());
+    return new AuthenticatedUser(userId, roleSet);
   }
 
   public long getAccessTtlSeconds() {

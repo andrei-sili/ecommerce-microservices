@@ -70,6 +70,22 @@ public final class JwtTestKeys {
         .compact();
   }
 
+  /** Valid signed RS256 token carrying a caller-supplied roles claim (e.g. a list with a null). */
+  public static String mintRs256WithRoles(long userId, String kid, KeyPair keyPair, List<?> roles) {
+    Instant now = Instant.now();
+    return Jwts.builder()
+        .header()
+        .keyId(kid)
+        .and()
+        .issuer("user-service-test")
+        .subject(String.valueOf(userId))
+        .claim("roles", roles)
+        .issuedAt(Date.from(now))
+        .expiration(Date.from(now.plusSeconds(900)))
+        .signWith(keyPair.getPrivate(), Jwts.SIG.RS256)
+        .compact();
+  }
+
   /**
    * Valid RS256 signature but with NO kid header — must be rejected, never an immutable-map NPE.
    */

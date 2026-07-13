@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.ecommerce.user.support.JwtTestKeys;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -146,5 +147,19 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
   void rs256WithoutKid_returns401() throws Exception {
     long userId = registerUser("nokid@example.com", "NoKid");
     expectUnauthorizedEnvelope(JwtTestKeys.mintRs256NoKid(userId, JwtTestKeys.KEY_PAIR_A));
+  }
+
+  /**
+   * Residual of the same class as the null-kid blocker: a validly-signed token whose roles claim
+   * has a null element. Set.copyOf(roles) NPEs post-verification and would escape as a 500 — must
+   * be a standard 401 (malformed token, fail-closed), with observability left flat.
+   */
+  @Test
+  void rolesClaimWithNullElement_returns401() throws Exception {
+    long userId = registerUser("nullrole@example.com", "NullRole");
+    String token =
+        JwtTestKeys.mintRs256WithRoles(
+            userId, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A, Arrays.asList("USER", null));
+    expectUnauthorizedEnvelope(token);
   }
 }
