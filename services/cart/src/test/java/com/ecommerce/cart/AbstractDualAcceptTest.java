@@ -29,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /**
  * Shared scaffolding for the Slice 5e dual-accept validation suites: exercises the REAL filter
@@ -82,11 +83,26 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
    * refactor that increments on rejection must turn this red, never green.
    */
   protected void expectUnauthorizedEnvelope(String token) throws Exception {
+    performUnauthorizedFlat(get(CART_PATH).header("Authorization", "Bearer " + token));
+  }
+
+  /**
+   * Abuse-row for a RAW Authorization header (non-Bearer schemes) — envelope + flat observability.
+   */
+  protected void expectUnauthorizedForHeader(String authorizationHeaderValue) throws Exception {
+    performUnauthorizedFlat(get(CART_PATH).header("Authorization", authorizationHeaderValue));
+  }
+
+  /** Abuse-row for a request with NO Authorization header — envelope + flat observability. */
+  protected void expectUnauthorizedWithoutAuth() throws Exception {
+    performUnauthorizedFlat(get(CART_PATH));
+  }
+
+  private void performUnauthorizedFlat(MockHttpServletRequestBuilder request) throws Exception {
     double acceptedBefore = totalAccepted();
     int auditBefore = auditLineCount();
 
-    expectUnauthorizedEnvelope(
-        mockMvc.perform(get(CART_PATH).header("Authorization", "Bearer " + token)));
+    expectUnauthorizedEnvelope(mockMvc.perform(request));
 
     assertEquals(
         acceptedBefore,
