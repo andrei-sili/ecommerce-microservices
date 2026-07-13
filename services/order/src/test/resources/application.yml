@@ -1,4 +1,12 @@
 spring:
+  datasource:
+    hikari:
+      # The suite boots several distinct Spring contexts (the dual-accept allowlist variants each
+      # pin their own accepted-algs), and every context opens its own pool against the single shared
+      # Testcontainers Postgres. Cap the per-context pool so the sum stays well under the container's
+      # max_connections — the default pool of 10 exhausted it ("too many clients already").
+      maximum-pool-size: 3
+      minimum-idle: 0
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
@@ -45,6 +53,9 @@ management:
 security:
   jwt:
     secret: test-secret-that-is-long-enough-for-hs256-1234567890
+    # Dual-accept default; public-keys map is wired per-context via @DynamicPropertySource (runtime
+    # temp PEM paths). RS256-only / HS256-only suites override accepted-algs with their own source.
+    accepted-algs: HS256,RS256
 
 clients:
   cart:

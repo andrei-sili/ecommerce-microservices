@@ -14,6 +14,7 @@ import com.ecommerce.product.security.JwtService;
 import com.ecommerce.product.security.RestAccessDeniedHandler;
 import com.ecommerce.product.security.RestAuthenticationEntryPoint;
 import com.ecommerce.product.service.CategoryService;
+import com.ecommerce.product.support.JwtTestKeys;
 import com.ecommerce.product.support.TestJwt;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -21,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,17 +34,29 @@ import org.springframework.test.web.servlet.MockMvc;
   JwtService.class,
   RestAuthenticationEntryPoint.class,
   RestAccessDeniedHandler.class,
-  com.ecommerce.product.exception.GlobalExceptionHandler.class
+  com.ecommerce.product.exception.GlobalExceptionHandler.class,
+  com.ecommerce.product.support.JwtSliceTestConfig.class
 })
 @TestPropertySource(
     properties = {
       "security.jwt.secret=" + TestJwt.SECRET,
+      // HS256-only in this slice: these controller tests mint HS256 tokens, so no RSA public key is
+      // needed. The RS256 dual-accept matrix is covered by the full-context suites.
+      "security.jwt.accepted-algs=HS256",
       "security.internal-api-key=test-internal-api-key"
     })
 class CategoryControllerWebTest {
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private CategoryService categoryService;
+
+  @DynamicPropertySource
+  static void jwtPublicKey(DynamicPropertyRegistry registry) {
+    // Override the yml public-key placeholder with a runtime-generated key so the dual-accept
+    // validator loads valid material; these controller tests exercise HS256 tokens.
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
+  }
 
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
   private static final String USER = TestJwt.bearer(TestJwt.token("2", List.of("USER")));

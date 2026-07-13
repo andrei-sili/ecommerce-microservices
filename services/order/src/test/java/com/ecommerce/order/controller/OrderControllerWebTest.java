@@ -24,13 +24,18 @@ import com.ecommerce.order.security.RestAuthenticationEntryPoint;
 import com.ecommerce.order.service.OrderService;
 import com.ecommerce.order.service.OrderService.PlacementResult;
 import com.ecommerce.order.support.TestJwt;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -45,10 +50,23 @@ import org.springframework.test.web.servlet.MockMvc;
   JwtService.class,
   RestAuthenticationEntryPoint.class,
   RestAccessDeniedHandler.class,
-  com.ecommerce.order.exception.GlobalExceptionHandler.class
+  com.ecommerce.order.exception.GlobalExceptionHandler.class,
+  OrderControllerWebTest.MeterRegistryConfig.class
 })
-@TestPropertySource(properties = "security.jwt.secret=" + TestJwt.SECRET)
+@EnableConfigurationProperties(com.ecommerce.order.config.JwtProperties.class)
+// HS256-only here (this slice tests the controller, not the RS256 matrix) so no public key is
+// required to boot JwtService; the full dual-accept matrix lives in the security integration tests.
+@TestPropertySource(
+    properties = {"security.jwt.secret=" + TestJwt.SECRET, "security.jwt.accepted-algs=HS256"})
 class OrderControllerWebTest {
+
+  @TestConfiguration
+  static class MeterRegistryConfig {
+    @Bean
+    MeterRegistry meterRegistry() {
+      return new SimpleMeterRegistry();
+    }
+  }
 
   private static final UUID ORDER_ID = UUID.fromString("9f1c2e7a-0000-0000-0000-000000000001");
   private static final String USER = TestJwt.bearer(TestJwt.token("7", List.of("USER")));

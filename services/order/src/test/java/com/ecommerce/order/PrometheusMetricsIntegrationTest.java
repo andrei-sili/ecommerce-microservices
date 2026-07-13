@@ -2,6 +2,7 @@ package com.ecommerce.order;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -15,6 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -61,12 +63,17 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
 
   // Criterion (abuse): a protected business route with a malformed/non-parseable bearer token is
   // left unauthenticated by the JWT filter and still gets 401 — never served as if authenticated.
+  // Pins the FULL 4-field envelope (not just status + error), like the other abuse rows.
   @Test
-  void protectedRoute_invalidToken_stillReturns401() throws Exception {
+  void protectedRoute_invalidToken_stillReturns401_withFullEnvelope() throws Exception {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", "Bearer not-a-real-jwt"))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.error", is("UNAUTHORIZED")));
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
+        .andExpect(jsonPath("$.message", is("Authentication required")))
+        .andExpect(jsonPath("$.path", is("/api/v1/orders")))
+        .andExpect(jsonPath("$.timestamp", notNullValue()));
   }
 
   // Criterion: /actuator/prometheus is an operational endpoint, NOT under /api/v1 — so it is exempt

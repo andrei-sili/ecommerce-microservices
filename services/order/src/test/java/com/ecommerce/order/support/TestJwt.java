@@ -31,7 +31,10 @@ public final class TestJwt {
         .claim("roles", roles)
         .issuedAt(Date.from(Instant.now()))
         .expiration(Date.from(expiry))
-        .signWith(key)
+        // Pin HS256 explicitly: single-arg signWith infers the strongest alg the 52-byte secret
+        // allows (HS384), which the Slice 5e dual-accept keyLocator rejects (HS256-only branch).
+        // The User Service issues HS256, so these fixtures must mirror that alg.
+        .signWith(key, Jwts.SIG.HS256)
         .compact();
   }
 
