@@ -124,4 +124,27 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
     long userId = registerUser("kid@example.com", "Kid");
     expectUnauthorizedEnvelope(JwtTestKeys.mintRs256(userId, maliciousKid, JwtTestKeys.KEY_PAIR_A));
   }
+
+  /**
+   * Mirror of the unknown-kid row signed with the OTHER keypair. With two keys in a salt-randomized
+   * immutable map, this makes a "return values().iterator().next()" mutant deterministically
+   * caught: whichever key iterates first, its matching-signed token here would verify → 200 → red.
+   */
+  @Test
+  void unknownKid_signedWithKeyPairB_returns401() throws Exception {
+    long userId = registerUser("kidb@example.com", "KidB");
+    expectUnauthorizedEnvelope(
+        JwtTestKeys.mintRs256(userId, "unknown-kid-2099", JwtTestKeys.KEY_PAIR_B));
+  }
+
+  /**
+   * BLOCKER regression: an RS256 token with NO kid header. get(null) on the immutable public-key
+   * map throws NPE (unlike HashMap) — which would escape the filter and surface as a 500. Must be a
+   * standard 401, indistinguishable from unknown-kid (no cause oracle).
+   */
+  @Test
+  void rs256WithoutKid_returns401() throws Exception {
+    long userId = registerUser("nokid@example.com", "NoKid");
+    expectUnauthorizedEnvelope(JwtTestKeys.mintRs256NoKid(userId, JwtTestKeys.KEY_PAIR_A));
+  }
 }

@@ -70,6 +70,21 @@ public final class JwtTestKeys {
         .compact();
   }
 
+  /**
+   * Valid RS256 signature but with NO kid header — must be rejected, never an immutable-map NPE.
+   */
+  public static String mintRs256NoKid(long userId, KeyPair keyPair) {
+    Instant now = Instant.now();
+    return Jwts.builder()
+        .issuer("user-service-test")
+        .subject(String.valueOf(userId))
+        .claim("roles", List.of("USER"))
+        .issuedAt(Date.from(now))
+        .expiration(Date.from(now.plusSeconds(900)))
+        .signWith(keyPair.getPrivate(), Jwts.SIG.RS256)
+        .compact();
+  }
+
   /** RS384 — a valid RSA signature whose alg is outside the {@code RS256,HS256} allowlist. */
   public static String mintRs384(long userId, String kid, KeyPair keyPair) {
     Instant now = Instant.now();
@@ -171,6 +186,12 @@ public final class JwtTestKeys {
   public static String weak1024KeyPath() {
     return writeTempKey(
         "jwt-weak", pemEncode("PRIVATE KEY", generate(1024).getPrivate().getEncoded()));
+  }
+
+  /** A syntactically valid X.509/SPKI public key that is too weak (1024-bit modulus). */
+  public static String weak1024PublicKeyPath() {
+    return writeTempKey(
+        "jwt-weak-pub", pemEncode("PUBLIC KEY", generate(1024).getPublic().getEncoded()));
   }
 
   /** X.509 public key under a private-key armor header — public-key fail-fast on the header. */

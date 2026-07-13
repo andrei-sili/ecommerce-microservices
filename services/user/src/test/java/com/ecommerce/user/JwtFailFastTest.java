@@ -100,4 +100,34 @@ class JwtFailFastTest {
         failMessage(JwtTestKeys.SECRET, DUAL, JwtTestKeys.PRIVATE_KEY_PATH_A, Map.of());
     assertTrue(message.contains("public key"), message);
   }
+
+  @Test
+  void weak1024BitPublicKey_failsFast_namingModulus() {
+    String message =
+        failMessage(
+            JwtTestKeys.SECRET,
+            DUAL,
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            Map.of(JwtTestKeys.KID_A, JwtTestKeys.weak1024PublicKeyPath()));
+    assertTrue(message.contains("2048"), message);
+  }
+
+  @Test
+  void signingAlgRs256_inPhase1_failsFast() {
+    JwtProperties props =
+        new JwtProperties(
+            JwtTestKeys.SECRET,
+            900,
+            604800,
+            "user-service-test",
+            "RS256",
+            DUAL,
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
+    assertTrue(ex.getMessage().contains("JWT_SIGNING_ALG"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("phase 2"), ex.getMessage());
+  }
 }

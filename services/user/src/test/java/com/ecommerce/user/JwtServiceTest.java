@@ -1,7 +1,6 @@
 package com.ecommerce.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,13 +50,15 @@ class JwtServiceTest {
             .parseSignedClaims(token)
             .getPayload();
 
+    // Claim parity is contract-binding: EXACTLY these five keys, nothing else — a future
+    // claim("userEmail", ...) (PII under a non-blacklisted name) or a stray extra claim must fail
+    // here, not slip through a "no email/name" spot check.
+    assertEquals(Set.of("iss", "sub", "roles", "iat", "exp"), claims.keySet());
+    assertEquals("user-service-test", claims.get("iss"), "iss must equal the configured issuer");
     assertEquals("42", claims.getSubject());
-    assertTrue(claims.containsKey("roles"));
+    assertEquals(List.of("USER"), claims.get("roles"));
     assertTrue(claims.getIssuedAt() != null);
     assertTrue(claims.getExpiration() != null);
-    // No PII in the payload.
-    assertFalse(claims.containsKey("email"));
-    assertFalse(claims.containsKey("name"));
   }
 
   @Test

@@ -100,9 +100,25 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
         .andExpect(jsonPath("$.email", is(expectedEmail)));
   }
 
+  /**
+   * Abuse-row entry point: asserts the pinned 401 envelope AND that the rejection left
+   * observability flat — the {@code jwt.accepted.tokens} counter did not move and no {@code
+   * jwt.audit} line was emitted. The phase-3 contraction gate is MEASURED from that output, so a
+   * refactor that increments on rejection must turn this red, never green.
+   */
   protected void expectUnauthorizedEnvelope(String token) throws Exception {
+    double acceptedBefore = totalAccepted();
+    int auditBefore = auditLineCount();
+
     expectUnauthorizedEnvelope(
         mockMvc.perform(get(PROFILE_PATH).header("Authorization", "Bearer " + token)));
+
+    assertEquals(
+        acceptedBefore,
+        totalAccepted(),
+        0.0001,
+        "a rejected token must not increment jwt.accepted.tokens");
+    assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
@@ -130,6 +146,18 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     Counter counter =
         meterRegistry.find("jwt.accepted.tokens").tag("alg", alg).tag("kid", kid).counter();
     return counter == null ? 0.0 : counter.count();
+  }
+
+  /** Total acceptances across all tag combinations — the phase-3 gate's raw signal. */
+  protected double totalAccepted() {
+    return meterRegistry.find("jwt.accepted.tokens").counters().stream()
+        .mapToDouble(Counter::count)
+        .sum();
+  }
+
+  /** Count of captured {@code jwt.audit} lines (that logger emits only the acceptance line). */
+  protected int auditLineCount() {
+    return auditAppender.list.size();
   }
 
   protected void assertAudited(String expectedLine) {
