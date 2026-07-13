@@ -45,6 +45,7 @@ wait_exists() {
 need docker
 need k3d
 need kubectl
+need openssl
 
 # --- 1. inotify limits (host prep; needs sudo) ------------------------------
 WANT_WATCHES=524288
@@ -115,6 +116,21 @@ if [ ! -f "$OVERLAY/grafana.env" ]; then
     echo "   edit $OVERLAY/grafana.env to set a real admin password."
   fi
 fi
+
+# --- 5e. JWT RS256 key material (gitignored; FILE-mounted, never PEM-in-env) ------
+# The private key feeds the jwt-signing Secret (mounted ONLY into the user pod); the public
+# key feeds the jwt-public-key ConfigMap (all 5 Java services). Generated fresh here if
+# absent (under the gitignored overlays/local/keys/) so a first bring-up just works; kept
+# stable across re-runs so already-issued tokens stay valid. Recipe = runbook § "JWT keys".
+KEYS="$OVERLAY/keys"
+if [ ! -f "$KEYS/jwt-rs256-private.pem" ]; then
+  log "no JWT signing key yet — generating an RSA-2048 keypair under overlays/local/keys/"
+  mkdir -p "$KEYS"
+  openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$KEYS/jwt-rs256-private.pem"
+  rm -f "$KEYS/jwt-rs256-public.pem"
+fi
+[ -f "$KEYS/jwt-rs256-public.pem" ] || \
+  openssl pkey -in "$KEYS/jwt-rs256-private.pem" -pubout -out "$KEYS/jwt-rs256-public.pem"
 
 # --- 6. apply ---------------------------------------------------------------
 log "applying overlays/local"

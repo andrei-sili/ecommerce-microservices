@@ -21,6 +21,8 @@ k8s-down:
 OBS_CRD := https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
 k8s-validate:
 	@test -f $(OVERLAY)/secret.env || cp $(OVERLAY)/secret.env.example $(OVERLAY)/secret.env
+	@test -f $(OVERLAY)/keys/jwt-rs256-private.pem || { mkdir -p $(OVERLAY)/keys && openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out $(OVERLAY)/keys/jwt-rs256-private.pem && rm -f $(OVERLAY)/keys/jwt-rs256-public.pem; }
+	@test -f $(OVERLAY)/keys/jwt-rs256-public.pem || openssl pkey -in $(OVERLAY)/keys/jwt-rs256-private.pem -pubout -out $(OVERLAY)/keys/jwt-rs256-public.pem
 	kustomize build $(OVERLAY) | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default
 	kustomize build $(K8S_DIR)/overlays/prod | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default
 	kustomize build $(K8S_DIR)/base/observability/metrics | kubeconform -strict -summary -kubernetes-version 1.32.0 -schema-location default -schema-location '$(OBS_CRD)' -skip CustomResourceDefinition

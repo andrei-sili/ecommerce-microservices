@@ -1,2 +1,9 @@
 # Dev-only port overrides — never commit (keeps the committed compose single-edge).
 docker-compose.override.yml
+
+# JWT RS256 key material (Slice 5e) — generated per deployment, NEVER committed.
+# Covers BOTH the Compose bind-mount source (infra/keys/) and the k3d generator input
+# (infra/k8s/overlays/local/keys/). Only the private key is truly secret, but the whole
+# directory is ignored so no PEM ever reaches the public repo. Generate with the runbook
+# § "JWT keys" recipe (openssl genpkey / openssl pkey -pubout); k8s bring-up + CI seed it.
+keys/

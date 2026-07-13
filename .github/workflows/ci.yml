@@ -133,11 +133,17 @@ jobs:
             "https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz"
           echo "95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  kubeconform.tgz" | sha256sum -c -
           tar -xzf kubeconform.tgz kubeconform && sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
-      - name: Seed placeholder secret.env (the real one is gitignored; never committed)
+      - name: Seed placeholder secret.env + JWT keys (gitignored; never committed)
         working-directory: infra/k8s/overlays/local
         run: |
           cp secret.env.example secret.env
           cp grafana.env.example grafana.env
+          # Slice 5e: the jwt-signing Secret + jwt-public-key ConfigMap read PEM FILES from
+          # the gitignored keys/ dir. Generate an ephemeral throwaway keypair so kustomize's
+          # generators can build; this job validates SCHEMA only and never runs these keys.
+          mkdir -p keys
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out keys/jwt-rs256-private.pem
+          openssl pkey -in keys/jwt-rs256-private.pem -pubout -out keys/jwt-rs256-public.pem
       - name: Render and validate manifests
         run: |
           kustomize build infra/k8s/overlays/local \
