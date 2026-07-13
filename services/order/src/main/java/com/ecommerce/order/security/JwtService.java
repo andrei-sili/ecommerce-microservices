@@ -75,6 +75,14 @@ public class JwtService {
     Claims claims = jws.getPayload();
 
     String subject = claims.getSubject();
+    // The subject is the stringified numeric user id (User Service contract). Validate it here,
+    // before recordAcceptance and before the CurrentUser resolver's Long.valueOf runs. A
+    // validly-signed token whose sub is null/blank/non-numeric/oversized is broken, not an
+    // authenticated caller: without this guard the counter moves and the resolver then throws
+    // NumberFormatException into the catch-all 500 (a 5xx on client input). Fail closed → 401.
+    if (subject == null || !isNumericUserId(subject)) {
+      throw new MalformedJwtException("Malformed subject claim");
+    }
     List<?> roles = claims.get("roles", List.class);
     // A signed-but-malformed roles claim (e.g. "roles":[null]) is a broken token, not an empty role
     // set: reject it as 401 (fail-closed) instead of letting a downstream NPE escape the filter's
@@ -89,6 +97,15 @@ public class JwtService {
     // counter or emit an audit line (the phase-3 contraction gate reads exactly that signal).
     recordAcceptance(header.getAlgorithm(), header.getKeyId());
     return new AuthenticatedUser(subject, roleList);
+  }
+
+  private static boolean isNumericUserId(String subject) {
+    try {
+      Long.parseLong(subject);
+      return true;
+    } catch (NumberFormatException e) {
+      return false;
+    }
   }
 
   private void recordAcceptance(String alg, String kid) {
@@ -158,11 +175,10 @@ public class JwtService {
       String alg = header.getAlgorithm();
       if ("RS256".equals(alg) && rs256Enabled) {
         String kid = header.getKeyId();
-        // Reject an absent kid BEFORE the map lookup: publicKeysByKid is immutable (Map.copyOf),
-        // and get(null) throws NPE (unlike HashMap). That NPE would escape parseSignedClaims (the
-        // filter catches only JwtException/IllegalArgumentException) and surface as a 500 —
-        // breaking
-        // the pinned 401 contract and handing an unauthenticated caller a scriptable 5xx primitive.
+        // Reject an absent kid BEFORE the map lookup. publicKeysByKid is immutable (Map.copyOf), so
+        // get(null) throws NPE (unlike HashMap); that NPE would escape parseSignedClaims, dodge the
+        // filter's JwtException/IllegalArgumentException catch, and surface as a 500 — an
+        // unauthenticated caller handed a scriptable 5xx instead of the pinned 401.
         if (kid == null || kid.isBlank()) {
           throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
         }
