@@ -46,6 +46,14 @@ security:
     access-token-ttl-seconds: ${JWT_ACCESS_TTL_SECONDS:900}
     refresh-token-ttl-seconds: ${JWT_REFRESH_TTL_SECONDS:604800}
     issuer: user-service
+    # Slice 5e dual-accept: signer stays HS256 in phase 1 (RS256 flip is phase 2); validators accept
+    # both. Both flags are independently deployable/rollbackable — never coupled in one release.
+    signing-alg: ${JWT_SIGNING_ALG:HS256}
+    accepted-algs: ${JWT_ACCEPTED_ALGS:HS256,RS256}
+    # Key material arrives as mounted files (paths in env, never PEM content). Provided by P1-INFRA.
+    private-key-path: ${JWT_PRIVATE_KEY_PATH}
+    public-keys:
+      user-rs256-2026-07: ${JWT_PUBLIC_KEY_PATH}
 
 admin:
   bootstrap:

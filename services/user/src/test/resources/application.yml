@@ -18,6 +18,9 @@ security:
     access-token-ttl-seconds: 900
     refresh-token-ttl-seconds: 604800
     issuer: user-service-test
+    # Phase-1 defaults; RS256 key paths are injected per test via @DynamicPropertySource.
+    signing-alg: HS256
+    accepted-algs: HS256,RS256
 
 admin:
   bootstrap:
