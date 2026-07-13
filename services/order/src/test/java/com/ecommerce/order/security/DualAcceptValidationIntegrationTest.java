@@ -153,6 +153,57 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
   }
 
   /**
+   * Strict {@code Bearer } scheme (#23 class): a valid RS256 token presented under a wrong scheme,
+   * wrong case, glued without a space, or with no scheme at all → 401, envelope intact,
+   * observability flat (the filter never calls parse() for a non-{@code Bearer } header).
+   */
+  @ParameterizedTest(name = "auth=[{0}]")
+  @MethodSource("nonBearerAuthHeaders")
+  void nonBearerScheme_returns401(String label, String authHeaderValue) throws Exception {
+    expectUnauthorizedForAuthHeader(authHeaderValue);
+  }
+
+  static Stream<Arguments> nonBearerAuthHeaders() {
+    String token = JwtTestKeys.mintRs256(OWNER_ID, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A);
+    return Stream.of(
+        Arguments.of("Basic scheme", "Basic " + token),
+        Arguments.of("Token scheme", "Token " + token),
+        Arguments.of("lowercase bearer", "bearer " + token),
+        Arguments.of("glued, no space", "Bearer" + token),
+        Arguments.of("raw, no scheme", token));
+  }
+
+  /**
+   * Malformed token under the correct scheme: "Bearer &lt;garbage&gt;" reaches parse() but is not a
+   * parseable JWT → 401 with the full 4-field envelope, observability flat. Pins the
+   * malformed-token cause through the same assertion machinery as the other abuse rows.
+   */
+  @Test
+  void malformedBearerToken_returns401() throws Exception {
+    expectUnauthorizedEnvelope("not-a-real-jwt");
+  }
+
+  /**
+   * A validly-signed RS256 token whose {@code sub} is not a numeric user id. It is rejected in
+   * parse() BEFORE recordAcceptance (counter flat) and never reaches the CurrentUser resolver's
+   * Long.valueOf — so it cannot surface as a counter-moved 500. Pins the
+   * sub-validation-on-the-accept-path guard.
+   */
+  @Test
+  void validSignatureNonNumericSubject_returns401_observabilityFlat() throws Exception {
+    expectUnauthorizedEnvelope(
+        JwtTestKeys.mintRs256Subject("not-a-number", JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+  }
+
+  /** Oversized numeric sub (&gt; Long.MAX_VALUE) — a NumberFormatException in the resolver too. */
+  @Test
+  void validSignatureOversizedSubject_returns401() throws Exception {
+    expectUnauthorizedEnvelope(
+        JwtTestKeys.mintRs256Subject(
+            "99999999999999999999999999", JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+  }
+
+  /**
    * IDOR on the new RS256 path: user A holds a fully valid RS256 token but requests user B's order.
    * The token is ACCEPTED (auth succeeds — counter/audit move), then ownership denies access with a
    * 404 that does not leak existence (contract §Order). This proves the sub/roles claims drive

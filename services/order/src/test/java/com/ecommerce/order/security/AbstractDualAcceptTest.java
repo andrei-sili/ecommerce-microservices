@@ -128,6 +128,27 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
   }
 
+  /**
+   * Abuse-row variant that sends a caller-supplied RAW {@code Authorization} header value
+   * (non-Bearer schemes, wrong case, missing space, no scheme). Asserts the pinned 401 envelope AND
+   * flat observability — the strict {@code Bearer } prefix means the filter never calls parse(), so
+   * the counter/audit must not move.
+   */
+  protected void expectUnauthorizedForAuthHeader(String authorizationHeaderValue) throws Exception {
+    double acceptedBefore = totalAccepted();
+    int auditBefore = auditLineCount();
+
+    expectUnauthorizedEnvelope(
+        mockMvc.perform(get(orderPath()).header("Authorization", authorizationHeaderValue)));
+
+    assertEquals(
+        acceptedBefore,
+        totalAccepted(),
+        0.0001,
+        "a rejected token must not increment jwt.accepted.tokens");
+    assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
+  }
+
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
     MvcResult result =
         actions

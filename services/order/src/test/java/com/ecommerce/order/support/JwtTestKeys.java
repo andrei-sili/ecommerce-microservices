@@ -69,6 +69,22 @@ public final class JwtTestKeys {
         .compact();
   }
 
+  /** Valid RS256 signature with a caller-supplied raw subject (e.g. non-numeric / oversized). */
+  public static String mintRs256Subject(String subject, String kid, KeyPair keyPair) {
+    Instant now = Instant.now();
+    return Jwts.builder()
+        .header()
+        .keyId(kid)
+        .and()
+        .issuer("user-service-test")
+        .subject(subject)
+        .claim("roles", List.of("USER"))
+        .issuedAt(Date.from(now))
+        .expiration(Date.from(now.plusSeconds(900)))
+        .signWith(keyPair.getPrivate(), Jwts.SIG.RS256)
+        .compact();
+  }
+
   /** Valid signed RS256 token carrying a caller-supplied roles claim (e.g. a list with a null). */
   public static String mintRs256WithRoles(long userId, String kid, KeyPair keyPair, List<?> roles) {
     Instant now = Instant.now();

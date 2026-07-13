@@ -79,16 +79,31 @@ class JwtServiceTest {
   }
 
   /**
-   * Pins the null-kid guard at the PARSE level, where it is discriminated. Through the filter the
-   * guard is invisible — JwtAuthenticationFilter catches Exception broadly, so dropping it lets the
-   * raw NPE from {@code publicKeysByKid.get(null)} still map to 401 and the integration row stays
-   * green. Here the NPE (not a JwtException) escapes parse() directly: with the guard this is a
-   * JwtException, without it a NullPointerException — so removing the guard turns THIS test red.
+   * Pins the null-kid guard at the parse level. With the filter's narrow catch ({@code JwtException
+   * | IllegalArgumentException}), dropping the guard lets the raw NPE from {@code
+   * publicKeysByKid.get(null)} escape as a 500 — so the integration row ({@code
+   * rs256WithoutKid_returns401}) turns red too. This unit test kills the same mutant
+   * filter-independently: with the guard parse() throws a JwtException, without it a
+   * NullPointerException — so removing the guard turns THIS test red.
    */
   @Test
   void parse_rs256WithoutKid_throws() {
     JwtService service = dualAccept();
     String noKid = JwtTestKeys.mintRs256NoKid(7, JwtTestKeys.KEY_PAIR_A);
     assertThatThrownBy(() -> service.parse(noKid)).isInstanceOf(JwtException.class);
+  }
+
+  /**
+   * Pins the subject guard at the parse level: a validly-signed token with a non-numeric sub throws
+   * a JwtException before recordAcceptance (counter untouched), so it can never reach the
+   * resolver's Long.valueOf and surface as a counter-moved 500.
+   */
+  @Test
+  void parse_nonNumericSubject_throws_andDoesNotCount() {
+    JwtService service = dualAccept();
+    String badSub =
+        JwtTestKeys.mintRs256Subject("not-a-number", JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A);
+    assertThatThrownBy(() -> service.parse(badSub)).isInstanceOf(JwtException.class);
+    assertThat(accepted("RS256", JwtTestKeys.KID_A)).isEqualTo(0.0);
   }
 }
