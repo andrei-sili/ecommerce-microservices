@@ -44,6 +44,13 @@ public abstract class AbstractIntegrationTest {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
+    // Wire the runtime-generated RSA public keys so every context boots with valid dual-accept
+    // material. Two kids back the rotation-coexistence proof. accepted-algs stays at the yml
+    // default (HS256,RS256); RS256-only / HS256-only suites override it themselves.
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_B + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_B);
     registry.add("security.internal-api-key", () -> INTERNAL_API_KEY);
     // Prevent the sweeper from firing automatically during tests: set both the initial delay and
     // the fixed delay to ~292 million years so the @Scheduled trigger never runs. Tests that need

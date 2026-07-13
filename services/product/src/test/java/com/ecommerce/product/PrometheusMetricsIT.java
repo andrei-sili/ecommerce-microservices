@@ -2,6 +2,7 @@ package com.ecommerce.product;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ecommerce.product.support.JwtTestKeys;
 import com.ecommerce.product.support.TestJwt;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,6 +58,10 @@ class PrometheusMetricsIT {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
+    // Override the yml public-key placeholder with a runtime-generated key so the dual-accept
+    // context boots (RS256 is enabled by default); this suite only exercises HS256 tokens.
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
     registry.add("security.internal-api-key", () -> "test-internal-api-key");
     registry.add("reservation.sweeper.delay-ms", () -> String.valueOf(Long.MAX_VALUE / 2));
   }
