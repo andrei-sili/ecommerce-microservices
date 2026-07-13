@@ -67,10 +67,21 @@ public class JwtService {
     this.hs256Enabled = accepted.contains("HS256");
     this.rs256Enabled = accepted.contains("RS256");
 
-    boolean signsHs256 =
-        properties.signingAlg() == null || "HS256".equalsIgnoreCase(properties.signingAlg().trim());
-    this.hmacKey =
-        (hs256Enabled || signsHs256) ? loadHmacKey(properties.secret(), hs256Enabled) : null;
+    // Phase 1 signs HS256 only. Reject any other JWT_SIGNING_ALG at startup so an RS256 flip
+    // fail-fasts here instead of silently no-op'ing now (issuance is hardcoded HS256) or NPE'ing at
+    // the first /login once the secret is gone. The real signer flip lands in phase 2.
+    String signingAlg = properties.signingAlg() == null ? "HS256" : properties.signingAlg().trim();
+    if (!"HS256".equalsIgnoreCase(signingAlg)) {
+      throw new IllegalStateException(
+          "JWT_SIGNING_ALG="
+              + signingAlg
+              + " is not supported in this build; phase 1 signs HS256 only (the RS256 signer flip"
+              + " lands in phase 2)");
+    }
+
+    // Signing is HS256, so the legacy secret is always required (it also validates HS256 tokens
+    // while HS256 is in the allowlist). hmacKey is therefore never null.
+    this.hmacKey = loadHmacKey(properties.secret(), hs256Enabled);
     this.publicKeysByKid = loadPublicKeys(properties.publicKeys(), rs256Enabled);
     this.signingPrivateKey = RsaPemKeys.loadPrivateKey(properties.privateKeyPath());
 
@@ -174,7 +185,16 @@ public class JwtService {
     protected Key locate(JwsHeader header) {
       String alg = header.getAlgorithm();
       if ("RS256".equals(alg) && rs256Enabled) {
-        RSAPublicKey key = publicKeysByKid.get(header.getKeyId());
+        String kid = header.getKeyId();
+        // Reject an absent kid BEFORE the map lookup: publicKeysByKid is immutable (Map.copyOf),
+        // and get(null) throws NPE (unlike HashMap). That NPE would escape parseSignedClaims (the
+        // filter catches only JwtException/IllegalArgumentException) and surface as a 500 —
+        // breaking
+        // the pinned 401 contract and handing an unauthenticated caller a scriptable 5xx primitive.
+        if (kid == null || kid.isBlank()) {
+          throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
+        }
+        RSAPublicKey key = publicKeysByKid.get(kid);
         if (key == null) {
           throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
         }
