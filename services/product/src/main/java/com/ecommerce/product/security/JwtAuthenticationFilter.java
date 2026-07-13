@@ -49,9 +49,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(authentication);
       } catch (JwtException | IllegalArgumentException ex) {
         // Invalid/expired token: leave the context unauthenticated; the entry point returns 401.
-        // Narrow on purpose (parity with user): a non-JWT RuntimeException (e.g. the null-kid /
-        // roles-null guards) must NOT be swallowed here — it surfaces as a 500, which the guards
-        // exist to prevent, so those guards are load-bearing rather than redundant.
+        // Narrow on purpose (parity with user): only JWT-shaped failures are swallowed here. A
+        // no-kid or null-role token would otherwise raise a raw NPE (a non-JWT RuntimeException)
+        // that escapes this catch and surfaces as a 500; the JwtService guards convert those into
+        // JwtExceptions caught here as 401, which is exactly what makes those guards load-bearing.
         SecurityContextHolder.clearContext();
       }
     }
