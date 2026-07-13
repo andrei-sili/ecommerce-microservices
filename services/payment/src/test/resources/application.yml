@@ -34,7 +34,10 @@ server:
 
 security:
   jwt:
-    secret: test-secret-that-is-long-enough-for-hs256-1234567890
+    # The legacy HS256 secret + the RS256 public keys are wired per-context from JwtTestKeys via
+    # @DynamicPropertySource (AbstractIntegrationTest) — a single source, never a duplicated literal.
+    # Only the validator allowlist default lives here; the contraction suites override it.
+    accepted-algs: HS256,RS256
   webhook:
     secret: test-webhook-secret
 
