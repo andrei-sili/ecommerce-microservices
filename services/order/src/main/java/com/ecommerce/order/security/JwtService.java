@@ -160,8 +160,9 @@ public class JwtService {
         String kid = header.getKeyId();
         // Reject an absent kid BEFORE the map lookup: publicKeysByKid is immutable (Map.copyOf),
         // and get(null) throws NPE (unlike HashMap). That NPE would escape parseSignedClaims (the
-        // filter catches only JwtException) and surface as a 500 — breaking the pinned 401 contract
-        // and handing an unauthenticated caller a scriptable 5xx primitive.
+        // filter catches only JwtException/IllegalArgumentException) and surface as a 500 —
+        // breaking
+        // the pinned 401 contract and handing an unauthenticated caller a scriptable 5xx primitive.
         if (kid == null || kid.isBlank()) {
           throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
         }

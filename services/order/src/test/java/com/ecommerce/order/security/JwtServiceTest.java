@@ -77,4 +77,18 @@ class JwtServiceTest {
             7, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A, Arrays.asList("USER", null));
     assertThatThrownBy(() -> service.parse(token)).isInstanceOf(JwtException.class);
   }
+
+  /**
+   * Pins the null-kid guard at the PARSE level, where it is discriminated. Through the filter the
+   * guard is invisible — JwtAuthenticationFilter catches Exception broadly, so dropping it lets the
+   * raw NPE from {@code publicKeysByKid.get(null)} still map to 401 and the integration row stays
+   * green. Here the NPE (not a JwtException) escapes parse() directly: with the guard this is a
+   * JwtException, without it a NullPointerException — so removing the guard turns THIS test red.
+   */
+  @Test
+  void parse_rs256WithoutKid_throws() {
+    JwtService service = dualAccept();
+    String noKid = JwtTestKeys.mintRs256NoKid(7, JwtTestKeys.KEY_PAIR_A);
+    assertThatThrownBy(() -> service.parse(noKid)).isInstanceOf(JwtException.class);
+  }
 }
