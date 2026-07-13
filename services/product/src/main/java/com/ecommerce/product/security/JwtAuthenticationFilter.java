@@ -1,6 +1,7 @@
 package com.ecommerce.product.security;
 
 import com.ecommerce.product.security.JwtService.AuthenticatedUser;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,8 +47,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             new UsernamePasswordAuthenticationToken(user.subject(), null, authorities);
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
-      } catch (Exception ex) {
-        // Invalid/expired token: leave the context unauthenticated. Do not leak details.
+      } catch (JwtException | IllegalArgumentException ex) {
+        // Invalid/expired token: leave the context unauthenticated; the entry point returns 401.
+        // Narrow on purpose (parity with user): a non-JWT RuntimeException (e.g. the null-kid /
+        // roles-null guards) must NOT be swallowed here — it surfaces as a 500, which the guards
+        // exist to prevent, so those guards are load-bearing rather than redundant.
         SecurityContextHolder.clearContext();
       }
     }

@@ -7,6 +7,7 @@ import com.ecommerce.product.config.JwtProperties;
 import com.ecommerce.product.support.JwtTestKeys;
 import com.ecommerce.product.support.TestJwt;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.List;
 import java.util.Map;
@@ -46,5 +47,19 @@ class JwtServiceTest {
   void rejectsHs256WhenAllowlistIsRs256Only() {
     assertThatThrownBy(() -> service(List.of("RS256")).parse(JwtTestKeys.mintHs256("42")))
         .isInstanceOf(JwtException.class);
+  }
+
+  /**
+   * Isolates the null-kid guard from the filter: an RS256 token with no kid header must throw a
+   * JwtException (not NPE on the immutable public-key map), so the guard stays load-bearing even if
+   * the filter's catch is ever widened again.
+   */
+  @Test
+  void parse_rs256WithoutKid_throws() {
+    assertThatThrownBy(
+            () ->
+                service(List.of("HS256", "RS256"))
+                    .parse(JwtTestKeys.mintRs256NoKid("7", JwtTestKeys.KEY_PAIR_A)))
+        .isInstanceOf(UnsupportedJwtException.class);
   }
 }
