@@ -31,7 +31,10 @@ public final class TestJwt {
         .claim("roles", roles)
         .issuedAt(Date.from(Instant.now()))
         .expiration(Date.from(expiry))
-        .signWith(key)
+        // Pin HS256 explicitly: single-arg signWith infers the strongest alg the key allows (this
+        // 52-byte secret yields HS384), but the User Service issues HS256 and the dual-accept
+        // validator only accepts HS256/RS256 — mirror the real issuer, not the key's max strength.
+        .signWith(key, Jwts.SIG.HS256)
         .compact();
   }
 

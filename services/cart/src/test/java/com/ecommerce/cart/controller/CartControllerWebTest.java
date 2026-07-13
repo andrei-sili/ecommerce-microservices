@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.cart.config.JwtProperties;
 import com.ecommerce.cart.config.SecurityConfig;
 import com.ecommerce.cart.dto.CartItemResponse;
 import com.ecommerce.cart.dto.CartResponse;
@@ -24,12 +25,17 @@ import com.ecommerce.cart.security.RestAccessDeniedHandler;
 import com.ecommerce.cart.security.RestAuthenticationEntryPoint;
 import com.ecommerce.cart.service.CartService;
 import com.ecommerce.cart.support.TestJwt;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
@@ -42,10 +48,24 @@ import org.springframework.test.web.servlet.MockMvc;
   JwtService.class,
   RestAuthenticationEntryPoint.class,
   RestAccessDeniedHandler.class,
-  GlobalExceptionHandler.class
+  GlobalExceptionHandler.class,
+  CartControllerWebTest.TestBeans.class
 })
-@TestPropertySource(properties = "security.jwt.secret=" + TestJwt.SECRET)
+@EnableConfigurationProperties(JwtProperties.class)
+// Slice-test scope: exercise only the legacy HS256 branch (mints HS256 tokens), so no RS256 public
+// key is required. The full dual-accept matrix runs through the real filter chain in the
+// full-context DualAccept suites.
+@TestPropertySource(
+    properties = {"security.jwt.secret=" + TestJwt.SECRET, "security.jwt.accepted-algs=HS256"})
 class CartControllerWebTest {
+
+  @TestConfiguration
+  static class TestBeans {
+    @Bean
+    MeterRegistry meterRegistry() {
+      return new SimpleMeterRegistry();
+    }
+  }
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private CartService cartService;

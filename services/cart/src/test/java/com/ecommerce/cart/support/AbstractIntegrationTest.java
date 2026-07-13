@@ -42,4 +42,19 @@ public abstract class AbstractIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
   }
+
+  /**
+   * Wires the runtime-generated RSA public keys so every full-context test boots with valid
+   * dual-accept material. The KID_A entry overrides the {@code ${JWT_PUBLIC_KEY_PATH}} placeholder
+   * carried by the main yaml; KID_B adds a second key for the rotation-coexistence proof. {@code
+   * accepted-algs} stays at the yml default (HS256,RS256); the allowlist-contraction suites
+   * override it with their own {@code @DynamicPropertySource}.
+   */
+  @DynamicPropertySource
+  static void jwtPublicKeys(DynamicPropertyRegistry registry) {
+    registry.add(
+        "security.jwt.public-keys." + JwtTestKeys.KID_A, () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
+    registry.add(
+        "security.jwt.public-keys." + JwtTestKeys.KID_B, () -> JwtTestKeys.PUBLIC_KEY_PATH_B);
+  }
 }
