@@ -161,8 +161,11 @@ public class JwtService {
       if ("RS256".equals(alg) && rs256Enabled) {
         String kid = header.getKeyId();
         // Reject an absent kid BEFORE the map lookup: publicKeysByKid is immutable (Map.copyOf),
-        // and get(null) throws NPE (unlike HashMap). Fail closed with a JwtException the filter
-        // already maps to the pinned 401, never an NPE escaping as a non-contract error.
+        // and get(null) throws NPE (unlike HashMap). The filter catches only JwtException /
+        // IllegalArgumentException, so that NPE would escape parseSignedClaims and surface as a
+        // non-contract 500 — handing an unauthenticated caller a scriptable 5xx. Fail closed with a
+        // typed JwtException instead (pinned at the parse seam by JwtServiceParseGuardTest and end
+        // to end by rs256WithoutKid_returns401).
         if (kid == null || kid.isBlank()) {
           throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
         }
