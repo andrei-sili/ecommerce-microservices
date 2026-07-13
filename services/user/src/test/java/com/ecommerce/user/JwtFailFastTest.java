@@ -113,7 +113,29 @@ class JwtFailFastTest {
   }
 
   @Test
-  void signingAlgRs256_inPhase1_failsFast() {
+  void unknownSigningAlg_failsFast_namingSupportedAlgs() {
+    JwtProperties props =
+        new JwtProperties(
+            JwtTestKeys.SECRET,
+            900,
+            604800,
+            "user-service-test",
+            "ES256",
+            DUAL,
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
+    assertTrue(ex.getMessage().contains("JWT_SIGNING_ALG"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("HS256 or RS256"), ex.getMessage());
+  }
+
+  @Test
+  void signingAlgRs256_withoutPrivateKey_failsFast() {
+    // Flipped to RS256, a missing/unreadable private key must stop startup — never a silent
+    // fallback
+    // to HS256 signing (§Abuse). The key is loaded unconditionally, so the failure is unmistakable.
     JwtProperties props =
         new JwtProperties(
             JwtTestKeys.SECRET,
@@ -122,12 +144,11 @@ class JwtFailFastTest {
             "user-service-test",
             "RS256",
             DUAL,
-            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            JwtTestKeys.missingKeyPath(),
             VALID_PUBLIC);
     IllegalStateException ex =
         assertThrows(
             IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
-    assertTrue(ex.getMessage().contains("JWT_SIGNING_ALG"), ex.getMessage());
-    assertTrue(ex.getMessage().contains("phase 2"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("could not be read"), ex.getMessage());
   }
 }
