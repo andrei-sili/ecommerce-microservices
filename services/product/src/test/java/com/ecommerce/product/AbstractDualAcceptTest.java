@@ -108,11 +108,35 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
   }
 
   protected ResultActions postProduct(String token) throws Exception {
+    return postProductRaw("Bearer " + token);
+  }
+
+  /** POST with a caller-supplied raw {@code Authorization} header (for non-Bearer scheme rows). */
+  private ResultActions postProductRaw(String authorizationHeaderValue) throws Exception {
     return mockMvc.perform(
         post(PRODUCT_PATH)
-            .header("Authorization", "Bearer " + token)
+            .header("Authorization", authorizationHeaderValue)
             .contentType(MediaType.APPLICATION_JSON)
             .content(productBody("DUAL-" + SKU_SEQ.incrementAndGet())));
+  }
+
+  /**
+   * Non-Bearer-scheme abuse row: sends a raw {@code Authorization} header, asserts the pinned 401
+   * envelope AND flat observability (counter unmoved, no {@code jwt.audit} line) — the filter must
+   * fail closed on any scheme that is not the strict, case-sensitive {@code "Bearer "} prefix.
+   */
+  protected void expectUnauthorizedRawHeader(String authorizationHeaderValue) throws Exception {
+    double acceptedBefore = totalAccepted();
+    int auditBefore = auditLineCount();
+
+    expectUnauthorizedEnvelope(postProductRaw(authorizationHeaderValue));
+
+    assertEquals(
+        acceptedBefore,
+        totalAccepted(),
+        0.0001,
+        "a rejected scheme must not increment jwt.accepted.tokens");
+    assertEquals(auditBefore, auditLineCount(), "a rejected scheme must not emit a jwt.audit line");
   }
 
   /**

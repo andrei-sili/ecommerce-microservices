@@ -10,6 +10,7 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -160,6 +161,28 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
         JwtTestKeys.mintRs256Roles(
             SUBJECT, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A, Arrays.asList("ADMIN", null));
     expectUnauthorizedEnvelope(token);
+  }
+
+  /**
+   * Every case carries a VALID RS256 token — only the scheme is wrong — so this pins scheme
+   * matching, not token validity. lowercase {@code bearer} and glued {@code Bearer} are deliberate:
+   * the contract mandates the strict, case-sensitive {@code "Bearer "} prefix (missing/non-Bearer/
+   * malformed → 401).
+   */
+  @ParameterizedTest(name = "{0}")
+  @CsvSource({
+    "Basic scheme,Basic dXNlcjpwYXNz",
+    "Token scheme,Token {token}",
+    "lowercase bearer scheme,bearer {token}",
+    "Bearer glued to token,Bearer{token}",
+    "raw token without scheme,{token}"
+  })
+  void nonBearerScheme_returns401WithStandardEnvelope(String label, String headerTemplate)
+      throws Exception {
+    String headerValue =
+        headerTemplate.replace(
+            "{token}", JwtTestKeys.mintRs256(SUBJECT, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+    expectUnauthorizedRawHeader(headerValue);
   }
 
   @Test
