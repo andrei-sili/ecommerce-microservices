@@ -1,6 +1,7 @@
 package com.ecommerce.cart.security;
 
 import com.ecommerce.cart.security.JwtService.AuthenticatedUser;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,8 +47,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             new UsernamePasswordAuthenticationToken(user.subject(), null, authorities);
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
-      } catch (Exception ex) {
-        // Invalid/expired token: leave the context unauthenticated. Do not leak details.
+      } catch (JwtException | IllegalArgumentException ex) {
+        // Invalid/expired token: leave the context unauthenticated; the entry point returns 401.
+        // Deliberately narrow (not catch-all): any other RuntimeException is a real defect and must
+        // surface, not be silently swallowed into an incidental 401. The parse-level guards
+        // (null-kid, roles-null) throw JwtException subtypes, so they stay inside this catch.
         SecurityContextHolder.clearContext();
       }
     }
