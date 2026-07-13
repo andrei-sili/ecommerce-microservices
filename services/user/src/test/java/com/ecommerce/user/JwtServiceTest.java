@@ -7,19 +7,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ecommerce.user.config.JwtProperties;
 import com.ecommerce.user.security.JwtService;
+import com.ecommerce.user.support.JwtTestKeys;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class JwtServiceTest {
 
-  private static final String SECRET = "test-jwt-secret-that-is-at-least-32-bytes-long-0123456789";
+  private static final String SECRET = JwtTestKeys.SECRET;
+  private static final MeterRegistry REGISTRY = new SimpleMeterRegistry();
 
-  private final JwtService jwtService =
-      new JwtService(new JwtProperties(SECRET, 900, 604800, "user-service-test"));
+  private final JwtService jwtService = new JwtService(props(SECRET), REGISTRY);
+
+  private static JwtProperties props(String secret) {
+    return new JwtProperties(
+        secret,
+        900,
+        604800,
+        "user-service-test",
+        "HS256",
+        List.of("HS256", "RS256"),
+        JwtTestKeys.PRIVATE_KEY_PATH_A,
+        Map.of(JwtTestKeys.KID_A, JwtTestKeys.PUBLIC_KEY_PATH_A));
+  }
 
   @Test
   void issuedToken_containsExactlyContractClaims_andNoPii() {
@@ -52,17 +69,13 @@ class JwtServiceTest {
   @Test
   void parse_rejectsTokenSignedWithDifferentSecret() {
     JwtService other =
-        new JwtService(
-            new JwtProperties(
-                "another-secret-that-is-also-at-least-32-bytes-xyz0", 900, 604800, "x"));
+        new JwtService(props("another-secret-that-is-also-at-least-32-bytes-xyz0"), REGISTRY);
     String foreign = other.issueAccessToken(1L, Set.of("USER"));
     assertThrows(Exception.class, () -> jwtService.parse(foreign));
   }
 
   @Test
   void constructor_rejectsShortSecret() {
-    assertThrows(
-        IllegalStateException.class,
-        () -> new JwtService(new JwtProperties("too-short", 900, 604800, "x")));
+    assertThrows(IllegalStateException.class, () -> new JwtService(props("too-short"), REGISTRY));
   }
 }

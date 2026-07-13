@@ -1,5 +1,6 @@
 package com.ecommerce.user;
 
+import com.ecommerce.user.support.JwtTestKeys;
 import org.junit.jupiter.api.BeforeAll;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -47,6 +48,21 @@ public abstract class AbstractIntegrationTest {
       ContainerHolder.failure = t;
       return null;
     }
+  }
+
+  /**
+   * Wires the runtime-generated RSA keys so every context test boots with valid dual-accept
+   * material (user is the signer → it mounts the private key too). Two kids are configured for the
+   * rotation-coexistence proof. {@code accepted-algs} stays at the yml default (HS256,RS256);
+   * RS256-only tests override it with their own {@code @DynamicPropertySource}.
+   */
+  @DynamicPropertySource
+  static void jwtKeyProperties(DynamicPropertyRegistry registry) {
+    registry.add("security.jwt.private-key-path", () -> JwtTestKeys.PRIVATE_KEY_PATH_A);
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
+    registry.add(
+        "security.jwt.public-keys[" + JwtTestKeys.KID_B + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_B);
   }
 
   @DynamicPropertySource
