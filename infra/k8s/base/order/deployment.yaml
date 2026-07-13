@@ -72,6 +72,13 @@ spec:
                 secretKeyRef:
                   name: ecommerce-secrets
                   key: RABBITMQ_PASSWORD
+            # Slice 5e — RS256 public key path (validation only; no private key on consumers).
+            - name: JWT_PUBLIC_KEY_PATH
+              value: /etc/jwt/public/jwt-rs256-public.pem
+          volumeMounts:
+            - name: jwt-public
+              mountPath: /etc/jwt/public
+              readOnly: true
           startupProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -103,3 +110,10 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        # Slice 5e — RS256 public key from a ConfigMap (public material, not a Secret).
+        # 0444 + readOnly mount: readable by the app UID, writable by nobody.
+        - name: jwt-public
+          configMap:
+            name: jwt-public-key
+            defaultMode: 0444

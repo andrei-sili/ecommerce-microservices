@@ -67,6 +67,19 @@ spec:
                 secretKeyRef:
                   name: ecommerce-secrets
                   key: ADMIN_PASSWORD
+            # Slice 5e — user is the ONLY signer: it holds the PRIVATE key path (never any
+            # other pod) and also the PUBLIC key (validates its own inbound tokens).
+            - name: JWT_PRIVATE_KEY_PATH
+              value: /etc/jwt/private/jwt-rs256-private.pem
+            - name: JWT_PUBLIC_KEY_PATH
+              value: /etc/jwt/public/jwt-rs256-public.pem
+          volumeMounts:
+            - name: jwt-private
+              mountPath: /etc/jwt/private
+              readOnly: true
+            - name: jwt-public
+              mountPath: /etc/jwt/public
+              readOnly: true
           startupProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -98,3 +111,15 @@ spec:
             capabilities:
               drop:
                 - ALL
+      volumes:
+        # Slice 5e — PRIVATE key from a dedicated jwt-signing Secret, mounted ONLY here
+        # (audit: the private key never reaches product/cart/order/payment). PUBLIC key
+        # from the shared jwt-public-key ConfigMap. 0444 + readOnly: readable, unwritable.
+        - name: jwt-private
+          secret:
+            secretName: jwt-signing
+            defaultMode: 0444
+        - name: jwt-public
+          configMap:
+            name: jwt-public-key
+            defaultMode: 0444

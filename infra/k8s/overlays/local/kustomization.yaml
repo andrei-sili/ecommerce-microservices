@@ -71,6 +71,14 @@ configMapGenerator:
   - name: rabbitmq-config
     literals:
       - RABBITMQ_DEFAULT_VHOST=/
+  # Slice 5e — RS256 PUBLIC key (validation material, non-secret) as a hashed ConfigMap,
+  # mounted read-only into all 5 Java services. Fed from the gitignored
+  # overlays/local/keys/jwt-rs256-public.pem (up.sh / CI / `make k8s-validate` generate it
+  # if absent — see runbook § "JWT keys"). The content-hash suffix rolls every consumer pod
+  # when the key changes, so a rotation restarts the validators automatically.
+  - name: jwt-public-key
+    files:
+      - jwt-rs256-public.pem=keys/jwt-rs256-public.pem
 
 # --- Secrets (NEVER committed) -----------------------------------------------
 # Reads the GITIGNORED infra/k8s/overlays/local/secret.env (same key scheme as
@@ -98,3 +106,11 @@ secretGenerator:
       disableNameSuffixHash: true
     envs:
       - grafana.env
+  # Slice 5e — RS256 PRIVATE signing key as a hashed Secret, mounted ONLY into the user
+  # Deployment (audit: the private key never reaches product/cart/order/payment). Fed from
+  # the gitignored overlays/local/keys/jwt-rs256-private.pem (up.sh / CI / `make k8s-validate`
+  # generate the keypair if absent — see runbook § "JWT keys"). It is a FILE-based Secret
+  # (not an env key in ecommerce-secrets): PEM never travels through env.
+  - name: jwt-signing
+    files:
+      - jwt-rs256-private.pem=keys/jwt-rs256-private.pem
