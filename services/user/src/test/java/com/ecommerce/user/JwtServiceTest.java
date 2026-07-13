@@ -8,12 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.ecommerce.user.config.JwtProperties;
 import com.ecommerce.user.security.JwtService;
 import com.ecommerce.user.support.JwtTestKeys;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -56,6 +58,21 @@ class JwtServiceTest {
     // No PII in the payload.
     assertFalse(claims.containsKey("email"));
     assertFalse(claims.containsKey("name"));
+  }
+
+  @Test
+  void issuedTokenHeader_pinsHs256_regardlessOfKeyStrength() throws Exception {
+    // Decode the JOSE header of the token emitted by the REAL service path. verifyWith(SecretKey)
+    // accepts HS256 OR HS384 on a 456-bit secret and discards the header, so it cannot catch a
+    // silent revert to single-arg signWith (which would infer HS384 → every consumer 401s, wrong
+    // observability tag, all other tests still green). This pins the emitted alg directly.
+    String token = jwtService.issueAccessToken(42L, Set.of("USER"));
+    String headerJson =
+        new String(
+            Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
+            StandardCharsets.UTF_8);
+    String alg = new ObjectMapper().readTree(headerJson).get("alg").asText();
+    assertEquals("HS256", alg, "issuer must pin HS256 explicitly (phase 1); the RS256 flip is P2");
   }
 
   @Test
