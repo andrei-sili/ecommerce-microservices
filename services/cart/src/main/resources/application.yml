@@ -38,6 +38,13 @@ server:
 security:
   jwt:
     secret: ${JWT_SECRET}
+    # Slice 5e dual-accept: validate both legacy HS256 and RS256 (post-flip). Cart never signs.
+    # Rollback/contraction is config-only via JWT_ACCEPTED_ALGS (e.g. RS256 once HS256 is retired).
+    accepted-algs: ${JWT_ACCEPTED_ALGS:HS256,RS256}
+    # Key material arrives as a mounted FILE (path in env, never PEM content). Provided by P1-INFRA.
+    # The kid is a literal map key (never reused); the path value is env-overridable.
+    public-keys:
+      user-rs256-2026-07: ${JWT_PUBLIC_KEY_PATH}
 
 product:
   service:
