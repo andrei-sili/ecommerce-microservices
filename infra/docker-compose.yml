@@ -150,12 +150,12 @@ services:
       # NOT a shared .env var) so the private-key audit `grep JWT_PRIVATE_KEY_PATH` resolves to
       # user wiring alone. It also mounts the PUBLIC key — user validates its own inbound tokens.
       JWT_PRIVATE_KEY_PATH: /etc/jwt/private/jwt-rs256-private.pem
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
       - ./keys/jwt-rs256-private.pem:/etc/jwt/private/jwt-rs256-private.pem:ro
-      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH}:ro
+      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}:ro
     networks:
       - ecommerce-net
     healthcheck:
@@ -180,13 +180,13 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Product fails fast at startup if this is unset; Order sends it as X-Internal-Api-Key.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # TTL for stock reservations; sweeper releases RESERVED rows past this deadline.
       RESERVATION_TTL_MINUTES: ${RESERVATION_TTL_MINUTES}
     volumes:
-      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH}:ro
+      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}:ro
     networks:
       - ecommerce-net
     healthcheck:
@@ -213,11 +213,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${CART_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Override the bare-hostname default (http://product:8082) with the compose DNS name.
       PRODUCT_SERVICE_URL: http://product-service:8082
     volumes:
-      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH}:ro
+      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}:ro
     networks:
       - ecommerce-net
     healthcheck:
@@ -244,7 +244,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # Override the bare-hostname defaults with the compose DNS names.
       CART_SERVICE_URL: http://cart-service:8083
@@ -256,7 +256,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
     volumes:
-      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH}:ro
+      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}:ro
     networks:
       - ecommerce-net
     healthcheck:
@@ -307,7 +307,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${PAYMENT_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
-      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET}
       PAYMENT_GATEWAY_API_KEY: ${PAYMENT_GATEWAY_API_KEY}
       # Payment calls Order with the user's forwarded JWT (user-scoped, not INTERNAL_API_KEY).
@@ -319,7 +319,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       RABBITMQ_VHOST: ${RABBITMQ_VHOST}
     volumes:
-      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH}:ro
+      - ./keys/jwt-rs256-public.pem:${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}:ro
     networks:
       - ecommerce-net
     healthcheck:
