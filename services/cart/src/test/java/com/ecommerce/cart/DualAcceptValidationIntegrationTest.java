@@ -150,4 +150,19 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
             USER_ID, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A, Arrays.asList("USER", null));
     expectUnauthorizedEnvelope(token);
   }
+
+  /**
+   * Same class as the null-kid / roles-null blockers: a validly-signed token whose {@code sub} is
+   * not a numeric user id. Cart validates {@code sub} IN parse() before recording acceptance, so it
+   * is a standard 401 ("Authentication required") with observability left FLAT — never counted as
+   * "accepted" and then 401'd downstream in the controller with a different ("Invalid token
+   * subject") envelope, which would both pollute the phase-3 counter and break the byte-identical
+   * envelope contract.
+   */
+  @Test
+  void validlySignedTokenWithNonNumericSubject_returns401_flat() throws Exception {
+    expectUnauthorizedEnvelope(
+        JwtTestKeys.mintRs256WithSubject(
+            "not-a-number", JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+  }
 }

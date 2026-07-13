@@ -83,6 +83,22 @@ public final class JwtTestKeys {
         .compact();
   }
 
+  /** Valid, correctly-signed RS256 token carrying an arbitrary (e.g. non-numeric) subject claim. */
+  public static String mintRs256WithSubject(String subject, String kid, KeyPair keyPair) {
+    Instant now = Instant.now();
+    return Jwts.builder()
+        .header()
+        .keyId(kid)
+        .and()
+        .issuer("user-service-test")
+        .subject(subject)
+        .claim("roles", List.of("USER"))
+        .issuedAt(Date.from(now))
+        .expiration(Date.from(now.plusSeconds(900)))
+        .signWith(keyPair.getPrivate(), Jwts.SIG.RS256)
+        .compact();
+  }
+
   /**
    * Valid RS256 signature but with NO kid header — must be rejected, never an immutable-map NPE.
    */

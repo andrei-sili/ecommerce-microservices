@@ -69,14 +69,34 @@ public class JwtService {
     JwsHeader header = jws.getHeader();
     Claims claims = jws.getPayload();
 
-    String subject = claims.getSubject();
+    String subject = requireNumericSubject(claims.getSubject());
     List<String> roles = extractRoles(claims);
 
-    // Record acceptance only after the token FULLY validates (signature, expiry, well-formed roles)
-    // — a token that 401s must not move the counter or emit an audit line (the phase-3 contraction
-    // gate reads exactly that signal).
+    // Record acceptance only after the token FULLY validates (signature, expiry, numeric subject,
+    // well-formed roles) — a token that 401s must not move the counter or emit an audit line (the
+    // phase-3 contraction gate reads exactly that signal).
     recordAcceptance(header.getAlgorithm(), header.getKeyId());
     return new AuthenticatedUser(subject, roles);
+  }
+
+  /**
+   * Validates the {@code sub} claim is a numeric user id BEFORE acceptance is recorded. A
+   * validly-signed token whose {@code sub} is missing/non-numeric/oversized is a broken token, not
+   * an accepted one: rejecting here (a {@link io.jsonwebtoken.JwtException}, mirroring the
+   * reference validator's {@code Long.valueOf}) keeps the phase-3 acceptance counter flat and the
+   * 401 envelope byte-identical to every other auth failure — instead of counting it "accepted" and
+   * letting the controller 401 it downstream with a different message.
+   */
+  private static String requireNumericSubject(String subject) {
+    if (subject == null || subject.isBlank()) {
+      throw new MalformedJwtException("Missing subject claim");
+    }
+    try {
+      Long.parseLong(subject);
+    } catch (NumberFormatException ex) {
+      throw new MalformedJwtException("Malformed subject claim");
+    }
+    return subject;
   }
 
   @SuppressWarnings("unchecked")
