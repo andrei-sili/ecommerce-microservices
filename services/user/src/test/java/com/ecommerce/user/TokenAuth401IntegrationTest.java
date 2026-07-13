@@ -16,6 +16,7 @@ import com.ecommerce.user.repository.UserRepository;
 import com.ecommerce.user.security.JwtService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -47,6 +48,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private JwtProperties jwtProperties;
+  @Autowired private MeterRegistry meterRegistry;
   @Autowired private OutboxEventRepository outboxEventRepository;
   @Autowired private UserRepository userRepository;
   @Autowired private RefreshTokenRepository refreshTokenRepository;
@@ -157,7 +159,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
   }
 
   private String mintValidToken(long userId) {
-    return new JwtService(jwtProperties).issueAccessToken(userId, Set.of("USER"));
+    return new JwtService(jwtProperties, meterRegistry).issueAccessToken(userId, Set.of("USER"));
   }
 
   private String mintExpiredToken(long userId) {
@@ -167,8 +169,12 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
             jwtProperties.secret(),
             -120,
             jwtProperties.refreshTokenTtlSeconds(),
-            jwtProperties.issuer());
-    return new JwtService(expiredProps).issueAccessToken(userId, Set.of("USER"));
+            jwtProperties.issuer(),
+            jwtProperties.signingAlg(),
+            jwtProperties.acceptedAlgs(),
+            jwtProperties.privateKeyPath(),
+            jwtProperties.publicKeys());
+    return new JwtService(expiredProps, meterRegistry).issueAccessToken(userId, Set.of("USER"));
   }
 
   private static String tamperSignature(String token) {
