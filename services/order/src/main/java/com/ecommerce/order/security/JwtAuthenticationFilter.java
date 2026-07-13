@@ -1,6 +1,7 @@
 package com.ecommerce.order.security;
 
 import com.ecommerce.order.security.JwtService.AuthenticatedUser;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,8 +47,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             new UsernamePasswordAuthenticationToken(user.subject(), token, authorities);
         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
         SecurityContextHolder.getContext().setAuthentication(authentication);
-      } catch (Exception ex) {
-        // Invalid/expired token: leave the context unauthenticated. Do not leak details.
+      } catch (JwtException | IllegalArgumentException ex) {
+        // Invalid/expired token: leave the context unauthenticated; the entry point returns 401.
+        // Narrow catch (parity with User Service): a non-JWT failure (e.g. an NPE from a missing
+        // guard) must surface, never be masked as a silent 401.
         SecurityContextHolder.clearContext();
       }
     }

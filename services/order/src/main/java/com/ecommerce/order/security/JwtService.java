@@ -1,54 +1,198 @@
 package com.ecommerce.order.security;
 
+import com.ecommerce.order.config.JwtProperties;
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.JwsHeader;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.LocatorAdapter;
+import io.jsonwebtoken.MalformedJwtException;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.Keys;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
+import java.security.Key;
+import java.security.interfaces.RSAPublicKey;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import javax.crypto.SecretKey;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
 /**
- * Validates HS256 access tokens issued by the User Service using the shared {@code JWT_SECRET}.
- * Order never issues tokens. Signature and expiry are both enforced by the parser; an invalid or
- * expired token raises a {@link io.jsonwebtoken.JwtException}.
+ * Validates inbound access tokens issued by the User Service with dual-accept (Slice 5e phase 1).
+ * Order never issues tokens — it is a validator only.
+ *
+ * <p>Validation routes by the JOSE {@code alg} header through a pinned map — {@code RS256} → the
+ * kid's RSA public key, {@code HS256} → the legacy secret (only while it is in the allowlist),
+ * anything else → reject. There is no try/catch fallback and the legacy secret is never derived
+ * from public-key bytes, so an {@code alg=HS256} token HMAC-signed with the trusted public PEM
+ * (algorithm confusion) verifies against the legacy secret and fails. Signature and expiry are both
+ * enforced by the parser; an invalid or expired token raises a {@link
+ * io.jsonwebtoken.JwtException}.
  */
-@Component
+@Service
 public class JwtService {
+
+  private static final Logger AUDIT_LOG = LoggerFactory.getLogger("jwt.audit");
 
   /** HS256 requires a key of at least 256 bits; mirrors the User Service issuer guard. */
   private static final int MIN_SECRET_BYTES = 32;
 
-  private final SecretKey key;
+  private final SecretKey hmacKey;
+  private final Map<String, RSAPublicKey> publicKeysByKid;
+  private final boolean hs256Enabled;
+  private final boolean rs256Enabled;
+  private final JwtParser parser;
+  private final MeterRegistry meterRegistry;
 
-  public JwtService(@Value("${security.jwt.secret}") String secret) {
-    if (!StringUtils.hasText(secret)) {
-      throw new IllegalStateException("JWT_SECRET must be configured");
+  public JwtService(JwtProperties properties, MeterRegistry meterRegistry) {
+    this.meterRegistry = meterRegistry;
+
+    Set<String> accepted = normalizeAlgs(properties.acceptedAlgs());
+    this.hs256Enabled = accepted.contains("HS256");
+    this.rs256Enabled = accepted.contains("RS256");
+
+    this.hmacKey = loadHmacKey(properties.secret(), hs256Enabled);
+    this.publicKeysByKid = loadPublicKeys(properties.publicKeys(), rs256Enabled);
+
+    this.parser = Jwts.parser().keyLocator(new AlgKeyLocator()).build();
+  }
+
+  /**
+   * Verifies signature AND expiry via the dual-accept locator; throws {@link
+   * io.jsonwebtoken.JwtException} on any failure. Records the accepted alg/kid on the counter and
+   * the {@code jwt.audit} log once the token FULLY validates.
+   */
+  public AuthenticatedUser parse(String token) {
+    Jws<Claims> jws = parser.parseSignedClaims(token);
+    JwsHeader header = jws.getHeader();
+    Claims claims = jws.getPayload();
+
+    String subject = claims.getSubject();
+    // The subject is the stringified numeric user id (User Service contract). Validate it here,
+    // before recordAcceptance and before the CurrentUser resolver's Long.valueOf runs. A
+    // validly-signed token whose sub is null/blank/non-numeric/oversized is broken, not an
+    // authenticated caller: without this guard the counter moves and the resolver then throws
+    // NumberFormatException into the catch-all 500 (a 5xx on client input). Fail closed → 401.
+    if (subject == null || !isNumericUserId(subject)) {
+      throw new MalformedJwtException("Malformed subject claim");
     }
-    byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+    List<?> roles = claims.get("roles", List.class);
+    // A signed-but-malformed roles claim (e.g. "roles":[null]) is a broken token, not an empty role
+    // set: reject it as 401 (fail-closed) instead of letting a downstream NPE escape the filter's
+    // JwtException catch into a non-contract 500.
+    if (roles != null && roles.stream().anyMatch(r -> r == null)) {
+      throw new MalformedJwtException("Malformed roles claim");
+    }
+    List<String> roleList =
+        roles == null ? List.of() : roles.stream().map(String::valueOf).toList();
+
+    // Record acceptance only after the token FULLY validates — a token that 401s must not move the
+    // counter or emit an audit line (the phase-3 contraction gate reads exactly that signal).
+    recordAcceptance(header.getAlgorithm(), header.getKeyId());
+    return new AuthenticatedUser(subject, roleList);
+  }
+
+  private static boolean isNumericUserId(String subject) {
+    try {
+      Long.parseLong(subject);
+      return true;
+    } catch (NumberFormatException e) {
+      return false;
+    }
+  }
+
+  private void recordAcceptance(String alg, String kid) {
+    // kid participates only in RS256 rotation; for RS256 it is an allowlist key resolved by the
+    // locator (bounded, injection-safe). HS256 has no kid → "-". This bounds tag cardinality.
+    String kidTag = "RS256".equals(alg) && kid != null && !kid.isBlank() ? kid : "-";
+    meterRegistry.counter("jwt.accepted.tokens", "alg", alg, "kid", kidTag).increment();
+    AUDIT_LOG.info("JWT accepted alg={} kid={}", alg, kidTag);
+  }
+
+  private static Set<String> normalizeAlgs(List<String> algs) {
+    if (algs == null || algs.isEmpty()) {
+      throw new IllegalStateException(
+          "JWT_ACCEPTED_ALGS must list at least one algorithm (e.g. HS256,RS256)");
+    }
+    Set<String> normalized = new java.util.HashSet<>();
+    for (String alg : algs) {
+      if (alg != null && !alg.isBlank()) {
+        normalized.add(alg.trim().toUpperCase(Locale.ROOT));
+      }
+    }
+    if (normalized.isEmpty()) {
+      throw new IllegalStateException(
+          "JWT_ACCEPTED_ALGS must list at least one algorithm (e.g. HS256,RS256)");
+    }
+    return normalized;
+  }
+
+  private static SecretKey loadHmacKey(String secret, boolean hs256Enabled) {
+    if (!hs256Enabled) {
+      // HS256 is not accepted (RS256-only build) → the legacy secret is not needed at all.
+      return null;
+    }
+    byte[] secretBytes = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
     if (secretBytes.length < MIN_SECRET_BYTES) {
       throw new IllegalStateException(
-          "JWT_SECRET must be at least " + MIN_SECRET_BYTES + " bytes for HS256");
+          "JWT_SECRET must be at least "
+              + MIN_SECRET_BYTES
+              + " bytes for HS256 (required because HS256 is in JWT_ACCEPTED_ALGS); configure a"
+              + " strong secret via env");
     }
-    this.key = Keys.hmacShaKeyFor(secretBytes);
+    return Keys.hmacShaKeyFor(secretBytes);
   }
 
-  public AuthenticatedUser parse(String token) {
-    Claims claims = Jwts.parser().verifyWith(key).build().parseSignedClaims(token).getPayload();
-    String subject = claims.getSubject();
-    List<String> roles = extractRoles(claims);
-    return new AuthenticatedUser(subject, roles);
+  private static Map<String, RSAPublicKey> loadPublicKeys(
+      Map<String, String> keyPaths, boolean rs256Enabled) {
+    Map<String, RSAPublicKey> keys = new LinkedHashMap<>();
+    if (keyPaths != null) {
+      keyPaths.forEach((kid, path) -> keys.put(kid, RsaPemKeys.loadPublicKey(kid, path)));
+    }
+    if (rs256Enabled && keys.isEmpty()) {
+      throw new IllegalStateException(
+          "RS256 is in JWT_ACCEPTED_ALGS but no public key is configured under"
+              + " security.jwt.public-keys");
+    }
+    return Map.copyOf(keys);
   }
 
-  @SuppressWarnings("unchecked")
-  private List<String> extractRoles(Claims claims) {
-    Object raw = claims.get("roles");
-    if (raw instanceof List<?> list) {
-      return list.stream().map(String::valueOf).toList();
+  /**
+   * Routes verification by the JOSE {@code alg} header through the pinned map. {@code alg=none} is
+   * rejected upstream by {@code parseSignedClaims} (jjwt disables unsecured JWTs by default; {@code
+   * enableUnsecured()} is never called), so it never reaches this locator.
+   */
+  private final class AlgKeyLocator extends LocatorAdapter<Key> {
+    @Override
+    protected Key locate(JwsHeader header) {
+      String alg = header.getAlgorithm();
+      if ("RS256".equals(alg) && rs256Enabled) {
+        String kid = header.getKeyId();
+        // Reject an absent kid BEFORE the map lookup. publicKeysByKid is immutable (Map.copyOf), so
+        // get(null) throws NPE (unlike HashMap); that NPE would escape parseSignedClaims, dodge the
+        // filter's JwtException/IllegalArgumentException catch, and surface as a 500 — an
+        // unauthenticated caller handed a scriptable 5xx instead of the pinned 401.
+        if (kid == null || kid.isBlank()) {
+          throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
+        }
+        RSAPublicKey key = publicKeysByKid.get(kid);
+        if (key == null) {
+          throw new UnsupportedJwtException("Unknown or unaccepted JWT key id");
+        }
+        return key;
+      }
+      if ("HS256".equals(alg) && hs256Enabled) {
+        return hmacKey;
+      }
+      throw new UnsupportedJwtException("Unsupported or unaccepted JWT algorithm");
     }
-    return List.of();
   }
 
   public record AuthenticatedUser(String subject, List<String> roles) {}
