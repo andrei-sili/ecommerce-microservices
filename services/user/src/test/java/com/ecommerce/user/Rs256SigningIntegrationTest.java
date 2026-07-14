@@ -3,6 +3,7 @@ package com.ecommerce.user;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,7 +43,9 @@ class Rs256SigningIntegrationTest extends AbstractDualAcceptTest {
     assertEquals(900, tokens.get("expires_in").asInt(), "TTL parity must survive the flip");
 
     JsonNode header = decodeHeader(access);
+    assertNotNull(header.get("alg"), "issued token header must carry an alg key");
     assertEquals("RS256", header.get("alg").asText(), "issued token must carry alg=RS256");
+    assertNotNull(header.get("kid"), "issued token header must carry a kid key");
     assertEquals(SIGNING_KID, header.get("kid").asText(), "issued token must carry the pinned kid");
 
     // Self-issued RS256 token is accepted by user's own dual-accept validator and observed as

@@ -1,12 +1,15 @@
 package com.ecommerce.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ecommerce.user.config.JwtProperties;
 import com.ecommerce.user.security.JwtService;
 import com.ecommerce.user.support.JwtTestKeys;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -46,11 +49,17 @@ class JwtServiceTest {
   }
 
   private static String headerAlg(String token) throws Exception {
+    return decodeHeader(token).get("alg").asText();
+  }
+
+  private static JsonNode decodeHeader(String token) throws Exception {
     String headerJson =
         new String(
             Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
             StandardCharsets.UTF_8);
-    return new ObjectMapper().readTree(headerJson).get("alg").asText();
+    JsonNode header = new ObjectMapper().readTree(headerJson);
+    assertNotNull(header.get("alg"), "token header must carry an alg key");
+    return header;
   }
 
   @Test
@@ -82,12 +91,15 @@ class JwtServiceTest {
     // silent revert to single-arg signWith (which would infer HS384 → every consumer 401s, wrong
     // observability tag, all other tests still green). This pins the emitted alg directly.
     String token = jwtService.issueAccessToken(42L, Set.of("USER"));
-    String headerJson =
-        new String(
-            Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
-            StandardCharsets.UTF_8);
-    String alg = new ObjectMapper().readTree(headerJson).get("alg").asText();
+    JsonNode header = decodeHeader(token);
+    String alg = header.get("alg").asText();
     assertEquals("HS256", alg, "issuer must pin HS256 explicitly (phase 1); the RS256 flip is P2");
+    // A refactor hoisting the kid stamp out of the RS256 branch would keep alg=HS256 (suite green)
+    // yet pollute the {alg,kid} Prometheus signal the phase-3 contraction gate reads — pin its
+    // absence.
+    assertNull(
+        header.get("kid"),
+        "HS256 tokens must NOT carry a kid — the {alg,kid} signal feeds the phase-3 contraction gate");
   }
 
   @Test
@@ -102,7 +114,9 @@ class JwtServiceTest {
             Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
             StandardCharsets.UTF_8);
     var header = new ObjectMapper().readTree(headerJson);
+    assertNotNull(header.get("alg"), "RS256 token header must carry an alg key");
     assertEquals("RS256", header.get("alg").asText(), "signer must pin RS256 explicitly");
+    assertNotNull(header.get("kid"), "RS256 token header must carry a kid key");
     assertEquals(
         SIGNING_KID, header.get("kid").asText(), "every RS256 token carries the pinned kid");
   }
@@ -116,6 +130,43 @@ class JwtServiceTest {
     String token = rs256.issueAccessToken(42L, Set.of("USER"));
     assertEquals(
         "RS256", headerAlg(token), "RS256 must be pinned regardless of key size (not RS512)");
+  }
+
+  @Test
+  void issuedRs256Token_acceptsLowercaseSigningAlg_normalizesToRs256() throws Exception {
+    // JwtService normalizes signing-alg via trim + toUpperCase (JwtService:89-92), but no test
+    // exercised anything but exact case. A lowercase "rs256" must still select the RS256 signer
+    // and stamp the pinned kid — otherwise the normalization is fail-closed but unpinned.
+    JwtService rs256 =
+        new JwtService(props(SECRET, "rs256", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    JsonNode header = decodeHeader(rs256.issueAccessToken(42L, Set.of("USER")));
+    assertEquals(
+        "RS256",
+        header.get("alg").asText(),
+        "lowercase signing-alg 'rs256' must normalize to the RS256 signer");
+    assertNotNull(header.get("kid"), "normalized RS256 token header must carry a kid key");
+    assertEquals(
+        SIGNING_KID,
+        header.get("kid").asText(),
+        "normalized RS256 token still carries the pinned kid");
+  }
+
+  @Test
+  void issuedRs256Token_acceptsPaddedSigningAlg_normalizesToRs256() throws Exception {
+    // The other half of the trim+uppercase normalization: surrounding whitespace must be trimmed
+    // so a padded " RS256 " selects the RS256 signer, not the fail-fast branch.
+    JwtService rs256 =
+        new JwtService(props(SECRET, " RS256 ", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    JsonNode header = decodeHeader(rs256.issueAccessToken(42L, Set.of("USER")));
+    assertEquals(
+        "RS256",
+        header.get("alg").asText(),
+        "padded signing-alg ' RS256 ' must trim+normalize to the RS256 signer");
+    assertNotNull(header.get("kid"), "normalized RS256 token header must carry a kid key");
+    assertEquals(
+        SIGNING_KID,
+        header.get("kid").asText(),
+        "normalized RS256 token still carries the pinned kid");
   }
 
   @Test
