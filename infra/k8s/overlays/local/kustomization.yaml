@@ -22,16 +22,21 @@ configMapGenerator:
       # rollback = HS256. Consumed by the user Deployment via envFrom user-config. Validators
       # stay dual-accept (JWT_ACCEPTED_ALGS) until phase 3 — never flip both in one deploy.
       - JWT_SIGNING_ALG=RS256
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this literal from all 5
+      # per-service configMaps -> dual default (HS256,RS256) from application.yml returns.
+      - JWT_ACCEPTED_ALGS=RS256
   - name: product-config
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://product-db:5432/product_db
       - RESERVATION_TTL_MINUTES=30
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+      - JWT_ACCEPTED_ALGS=RS256
   - name: cart-config
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://cart-db:5432/cart_db
       - PRODUCT_SERVICE_URL=http://product-service:8082
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+      - JWT_ACCEPTED_ALGS=RS256
   - name: order-config
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://order-db:5432/order_db
@@ -41,6 +46,7 @@ configMapGenerator:
       - RABBITMQ_PORT=5672
       - RABBITMQ_VHOST=/
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+      - JWT_ACCEPTED_ALGS=RS256
   - name: payment-config
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://payment-db:5432/payment_db
@@ -49,6 +55,7 @@ configMapGenerator:
       - RABBITMQ_PORT=5672
       - RABBITMQ_VHOST=/
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+      - JWT_ACCEPTED_ALGS=RS256
   - name: notification-config
     literals:
       - RABBITMQ_HOST=rabbitmq
