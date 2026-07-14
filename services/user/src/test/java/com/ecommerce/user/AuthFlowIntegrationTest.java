@@ -2,6 +2,7 @@ package com.ecommerce.user;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -250,7 +251,23 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
   void protectedEndpoint_withTamperedToken_returns401() throws Exception {
     register("ivan@example.com", VALID_PASSWORD, "Ivan");
     String access = login("ivan@example.com", VALID_PASSWORD).get("access_token").asText();
-    String tampered = access.substring(0, access.length() - 2) + "xx";
+
+    // Flip a char in the MIDDLE of the signature segment, not the last base64url chars: the
+    // trailing
+    // chars carry don't-care bits, so a tail edit can decode to the SAME signature bytes and the
+    // token still validates (200, flaky). A middle char is a full 6-bit group, so the decoded
+    // signature always changes. Assert the tampered token differs before sending, so a no-op tamper
+    // fails loudly instead of masquerading as a passing 401.
+    int lastDot = access.lastIndexOf('.');
+    String signature = access.substring(lastDot + 1);
+    int mid = signature.length() / 2;
+    char flipped = signature.charAt(mid) == 'A' ? 'B' : 'A';
+    String tampered =
+        access.substring(0, lastDot + 1)
+            + signature.substring(0, mid)
+            + flipped
+            + signature.substring(mid + 1);
+    assertNotEquals(access, tampered, "tampered token must differ from the original");
 
     mockMvc
         .perform(get("/api/v1/users/me").header("Authorization", "Bearer " + tampered))
