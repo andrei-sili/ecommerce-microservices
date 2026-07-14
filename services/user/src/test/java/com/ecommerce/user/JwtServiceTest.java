@@ -133,6 +133,43 @@ class JwtServiceTest {
   }
 
   @Test
+  void issuedRs256Token_acceptsLowercaseSigningAlg_normalizesToRs256() throws Exception {
+    // JwtService normalizes signing-alg via trim + toUpperCase (JwtService:89-92), but no test
+    // exercised anything but exact case. A lowercase "rs256" must still select the RS256 signer
+    // and stamp the pinned kid — otherwise the normalization is fail-closed but unpinned.
+    JwtService rs256 =
+        new JwtService(props(SECRET, "rs256", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    JsonNode header = decodeHeader(rs256.issueAccessToken(42L, Set.of("USER")));
+    assertEquals(
+        "RS256",
+        header.get("alg").asText(),
+        "lowercase signing-alg 'rs256' must normalize to the RS256 signer");
+    assertNotNull(header.get("kid"), "normalized RS256 token header must carry a kid key");
+    assertEquals(
+        SIGNING_KID,
+        header.get("kid").asText(),
+        "normalized RS256 token still carries the pinned kid");
+  }
+
+  @Test
+  void issuedRs256Token_acceptsPaddedSigningAlg_normalizesToRs256() throws Exception {
+    // The other half of the trim+uppercase normalization: surrounding whitespace must be trimmed
+    // so a padded " RS256 " selects the RS256 signer, not the fail-fast branch.
+    JwtService rs256 =
+        new JwtService(props(SECRET, " RS256 ", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    JsonNode header = decodeHeader(rs256.issueAccessToken(42L, Set.of("USER")));
+    assertEquals(
+        "RS256",
+        header.get("alg").asText(),
+        "padded signing-alg ' RS256 ' must trim+normalize to the RS256 signer");
+    assertNotNull(header.get("kid"), "normalized RS256 token header must carry a kid key");
+    assertEquals(
+        SIGNING_KID,
+        header.get("kid").asText(),
+        "normalized RS256 token still carries the pinned kid");
+  }
+
+  @Test
   void issuedRs256Token_containsExactlyContractClaims_verifiedWithPublicKey() {
     // Claim parity is unchanged by the flip: exactly {iss,sub,roles,iat,exp}, iss = configured
     // issuer, verified against the RSA PUBLIC key (the real validation material).
