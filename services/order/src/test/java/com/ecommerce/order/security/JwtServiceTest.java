@@ -106,4 +106,32 @@ class JwtServiceTest {
     assertThatThrownBy(() -> service.parse(badSub)).isInstanceOf(JwtException.class);
     assertThat(accepted("RS256", JwtTestKeys.KID_A)).isEqualTo(0.0);
   }
+
+  /**
+   * The exact phase-3 production shape: allowlist RS256-only and NO legacy secret (the yml {@code
+   * secret:} line is deleted → {@code JwtProperties.secret} binds null). The validator must
+   * construct with the secret absent ({@code loadHmacKey} short-circuits to null, never demanding
+   * it), ACCEPT a valid RS256 token, and REJECT a fresh legacy HS256 token — the same rejection the
+   * filter renders as the pinned 401 in {@link
+   * Rs256OnlyValidationIntegrationTest#freshHs256_afterContraction_returns401}. Untested fleet-wide
+   * before phase 3.
+   */
+  @Test
+  void parse_rs256OnlyWithSecretAbsent_constructsAcceptsRs256_rejectsHs256() {
+    JwtService service =
+        new JwtService(
+            new JwtProperties(
+                null, List.of("RS256"), Map.of(JwtTestKeys.KID_A, JwtTestKeys.PUBLIC_KEY_PATH_A)),
+            meterRegistry);
+
+    AuthenticatedUser user =
+        service.parse(JwtTestKeys.mintRs256(7, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+    assertThat(user.subject()).isEqualTo("7");
+    assertThat(user.roles()).containsExactly("USER");
+    assertThat(accepted("RS256", JwtTestKeys.KID_A)).isEqualTo(1.0);
+
+    assertThatThrownBy(() -> service.parse(JwtTestKeys.mintHs256(7)))
+        .isInstanceOf(JwtException.class);
+    assertThat(accepted("HS256", "-")).isEqualTo(0.0);
+  }
 }
