@@ -31,11 +31,12 @@ import org.springframework.stereotype.Service;
 /**
  * Issues access tokens and validates inbound tokens with dual-accept (Slice 5e).
  *
- * <p>Signing is config-driven ({@code JWT_SIGNING_ALG}): {@code HS256} (default) signs with the
- * legacy secret; {@code RS256} (phase-2 flip) signs with the mounted RSA private key and stamps
- * {@code kid=user-rs256-2026-07}. Both paths pin the algorithm explicitly ({@code Jwts.SIG.HS256} /
- * {@code Jwts.SIG.RS256}) — never single-arg {@code signWith}, which infers a stronger family on a
- * larger key. The HS256 signing path is kept, not deleted, so a rollback flip is config-only.
+ * <p>Signing is config-driven ({@code JWT_SIGNING_ALG}, default {@code RS256} since phase 3):
+ * {@code RS256} signs with the mounted RSA private key and stamps {@code kid=user-rs256-2026-07};
+ * {@code HS256} (emergency rollback) signs with the legacy secret. Both paths pin the algorithm
+ * explicitly ({@code Jwts.SIG.HS256} / {@code Jwts.SIG.RS256}) — never single-arg {@code signWith},
+ * which infers a stronger family on a larger key. The HS256 signing path is kept, not deleted, so a
+ * rollback flip stays code-reachable — but the legacy secret is deleted (fail-closed, D3).
  *
  * <p>Validation is an independent flag ({@code JWT_ACCEPTED_ALGS}) and routes by the JOSE {@code
  * alg} header through a pinned map — {@code RS256} → the kid's RSA public key, {@code HS256} → the
@@ -83,7 +84,7 @@ public class JwtService {
     this.hs256Enabled = accepted.contains("HS256");
     this.rs256Enabled = accepted.contains("RS256");
 
-    // The issuer signs HS256 (default) or RS256 (the phase-2 flip, JWT_SIGNING_ALG=RS256).
+    // The issuer signs RS256 (default) or HS256 (emergency rollback, JWT_SIGNING_ALG=HS256).
     // Any other value fail-fasts instead of silently signing the wrong alg. Signing and
     // validation are independent flags — user validates its own inbound tokens via the locator.
     String signingAlg =
@@ -98,10 +99,25 @@ public class JwtService {
     }
     this.signRs256 = "RS256".equals(signingAlg);
 
+    // Fail fast on a signer∉allowlist misconfig (e.g. sign HS256 + accept RS256-only, or the
+    // reverse): the issuer would mint tokens it then rejects, so every new login 401s — a silent
+    // self-DoS. Naming both properties and both values (never key material) makes the deploy-time
+    // cause unmistakable at startup instead of at the first failed login.
+    if (!accepted.contains(signingAlg)) {
+      throw new IllegalStateException(
+          "JWT_SIGNING_ALG="
+              + signingAlg
+              + " is not in JWT_ACCEPTED_ALGS="
+              + accepted
+              + "; the issuer would sign tokens it immediately rejects (every new login 401s)."
+              + " Align JWT_SIGNING_ALG and JWT_ACCEPTED_ALGS");
+    }
+
     // hmacKey signs HS256 tokens (while the signer is HS256) and validates them (while HS256 is
-    // accepted); it stays required through phase 2. publicKeysByKid validates RS256. The private
-    // key signs RS256 once flipped, loaded unconditionally so the flip cannot start keyless.
-    this.hmacKey = loadHmacKey(properties.secret(), hs256Enabled);
+    // accepted). The phase-3 default signs and accepts RS256 only, so it is null and the legacy
+    // secret may be absent entirely (fail-closed, D3). publicKeysByKid validates RS256; the private
+    // key signs RS256, loaded unconditionally so the flip cannot start keyless.
+    this.hmacKey = loadHmacKey(properties.secret(), hs256Enabled, !signRs256);
     this.publicKeysByKid = loadPublicKeys(properties.publicKeys(), rs256Enabled);
     this.signingPrivateKey = RsaPemKeys.loadPrivateKey(properties.privateKeyPath());
 
@@ -189,11 +205,18 @@ public class JwtService {
     return normalized;
   }
 
-  private static SecretKey loadHmacKey(String secret, boolean hs256Enabled) {
+  private static SecretKey loadHmacKey(String secret, boolean hs256Accepted, boolean signsHs256) {
+    // The legacy secret is required only while HS256 is issued OR validated. Once the signer is
+    // RS256 AND the allowlist has contracted to RS256 (phase-3 default), it may be absent entirely
+    // — mirrors the validator services, which never sign and drop the secret when HS256 is dropped.
+    if (!hs256Accepted && !signsHs256) {
+      return null;
+    }
     byte[] secretBytes = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
     if (secretBytes.length < 32) {
-      String reason =
-          hs256Enabled ? "HS256 is in JWT_ACCEPTED_ALGS" : "the signer still issues HS256";
+      // Name the branch that actually demands it: signing takes precedence (it cannot proceed
+      // without the secret) over mere validation-allowlist membership.
+      String reason = signsHs256 ? "the signer issues HS256" : "HS256 is in JWT_ACCEPTED_ALGS";
       throw new IllegalStateException(
           "JWT_SECRET must be at least 32 bytes for HS256 (required because "
               + reason
