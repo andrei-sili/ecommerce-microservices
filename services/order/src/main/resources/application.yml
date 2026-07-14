@@ -52,11 +52,12 @@ server:
 
 security:
   jwt:
-    secret: ${JWT_SECRET}
-    # Slice 5e dual-accept: Order validates both HS256 (legacy) and RS256 tokens issued by the User
-    # Service. Order never signs — no private key / signing-alg here. RS256 public key arrives as a
-    # mounted file (path in env, never PEM content); the kid is a literal map key.
-    accepted-algs: ${JWT_ACCEPTED_ALGS:HS256,RS256}
+    # Slice 5e phase-3 posture: Order validates RS256 only (default below). HS256 stays
+    # code-reachable behind this flag for an emergency rollback, but the legacy shared secret is
+    # deleted (fail-closed, D3) — re-widening needs a git revert plus a NEW secret, never a live env
+    # toggle. Order never signs — no private key / signing-alg here. The RS256 public key arrives as
+    # a mounted file (path in env, never PEM content); the kid is a literal map key.
+    accepted-algs: ${JWT_ACCEPTED_ALGS:RS256}
     public-keys:
       user-rs256-2026-07: ${JWT_PUBLIC_KEY_PATH}
 
