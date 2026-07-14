@@ -146,6 +146,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e phase-2 signer flip pinned as versioned config (phase-3 grace-clock anchor); rollback = set HS256, validators stay dual-accept (JWT_ACCEPTED_ALGS) until phase 3.
       JWT_SIGNING_ALG: RS256
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
+      JWT_ACCEPTED_ALGS: RS256
       # Slice 5e — RS256 key material delivered as read-only FILE mounts (never PEM-in-env:
       # compose vs --env-file newline semantics differ, moby#12997). user-service is the ONLY
       # signer, so it holds the PRIVATE key; its path is a hardcoded literal here (deliberately
@@ -183,6 +185,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
+      JWT_ACCEPTED_ALGS: RS256
       # Product fails fast at startup if this is unset; Order sends it as X-Internal-Api-Key.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # TTL for stock reservations; sweeper releases RESERVED rows past this deadline.
@@ -216,6 +220,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
+      JWT_ACCEPTED_ALGS: RS256
       # Override the bare-hostname default (http://product:8082) with the compose DNS name.
       PRODUCT_SERVICE_URL: http://product-service:8082
     volumes:
@@ -247,6 +253,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
+      JWT_ACCEPTED_ALGS: RS256
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       # Override the bare-hostname defaults with the compose DNS names.
       CART_SERVICE_URL: http://cart-service:8083
@@ -310,6 +318,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
+      # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
+      JWT_ACCEPTED_ALGS: RS256
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET}
       PAYMENT_GATEWAY_API_KEY: ${PAYMENT_GATEWAY_API_KEY}
       # Payment calls Order with the user's forwarded JWT (user-scoped, not INTERNAL_API_KEY).
