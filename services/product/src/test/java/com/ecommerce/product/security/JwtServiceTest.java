@@ -49,6 +49,25 @@ class JwtServiceTest {
         .isInstanceOf(JwtException.class);
   }
 
+  @Test
+  void rs256OnlyWithSecretAbsent_constructsAndValidates() {
+    // The exact phase-3 production shape: allowlist RS256-only and NO legacy secret (the yml
+    // `secret:` line is deleted → JwtProperties.secret binds null). The validator must construct
+    // (hmacKey null, never demanded), accept a valid RS256 token, and reject a fresh HS256 one — an
+    // entirely-absent-secret shape untested fleet-wide before this slice.
+    JwtService service =
+        new JwtService(
+            new JwtProperties(null, List.of("RS256"), PUBLIC_KEYS), new SimpleMeterRegistry());
+
+    JwtService.AuthenticatedUser user =
+        service.parse(JwtTestKeys.mintRs256("7", JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+    assertThat(user.subject()).isEqualTo("7");
+    assertThat(user.roles()).containsExactly("ADMIN");
+
+    assertThatThrownBy(() -> service.parse(JwtTestKeys.mintHs256("42")))
+        .isInstanceOf(JwtException.class);
+  }
+
   /**
    * Isolates the null-kid guard from the filter: an RS256 token with no kid header must throw a
    * JwtException (not NPE on the immutable public-key map), so the guard stays load-bearing even if

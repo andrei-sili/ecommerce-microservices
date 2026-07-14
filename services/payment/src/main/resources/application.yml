@@ -45,10 +45,11 @@ server:
 
 security:
   jwt:
-    secret: ${JWT_SECRET}
-    # Slice 5e dual-accept: payment validates BOTH the legacy HS256 tokens and the RS256 tokens the
-    # signer flips to in phase 2. Payment never signs — no private key, no signing-alg here.
-    accepted-algs: ${JWT_ACCEPTED_ALGS:HS256,RS256}
+    # Slice 5e phase-3 posture: payment validates RS256 only (default below). HS256 stays
+    # code-reachable behind JWT_ACCEPTED_ALGS for an emergency rollback, but the legacy secret is
+    # deleted (fail-closed, D3) — re-widening needs a git revert plus a NEW secret, never a live env
+    # toggle. Payment never signs — no private key, no signing-alg here.
+    accepted-algs: ${JWT_ACCEPTED_ALGS:RS256}
     # Key material arrives as a mounted file (path in env, never PEM content). Provided by P1-INFRA.
     # The kid is a literal YAML key; the path value is env-overridable.
     public-keys:
