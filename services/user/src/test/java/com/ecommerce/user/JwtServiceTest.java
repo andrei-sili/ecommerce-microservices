@@ -1,12 +1,15 @@
 package com.ecommerce.user;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.ecommerce.user.config.JwtProperties;
 import com.ecommerce.user.security.JwtService;
 import com.ecommerce.user.support.JwtTestKeys;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -46,11 +49,17 @@ class JwtServiceTest {
   }
 
   private static String headerAlg(String token) throws Exception {
+    return decodeHeader(token).get("alg").asText();
+  }
+
+  private static JsonNode decodeHeader(String token) throws Exception {
     String headerJson =
         new String(
             Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
             StandardCharsets.UTF_8);
-    return new ObjectMapper().readTree(headerJson).get("alg").asText();
+    JsonNode header = new ObjectMapper().readTree(headerJson);
+    assertNotNull(header.get("alg"), "token header must carry an alg key");
+    return header;
   }
 
   @Test
@@ -82,12 +91,15 @@ class JwtServiceTest {
     // silent revert to single-arg signWith (which would infer HS384 → every consumer 401s, wrong
     // observability tag, all other tests still green). This pins the emitted alg directly.
     String token = jwtService.issueAccessToken(42L, Set.of("USER"));
-    String headerJson =
-        new String(
-            Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
-            StandardCharsets.UTF_8);
-    String alg = new ObjectMapper().readTree(headerJson).get("alg").asText();
+    JsonNode header = decodeHeader(token);
+    String alg = header.get("alg").asText();
     assertEquals("HS256", alg, "issuer must pin HS256 explicitly (phase 1); the RS256 flip is P2");
+    // A refactor hoisting the kid stamp out of the RS256 branch would keep alg=HS256 (suite green)
+    // yet pollute the {alg,kid} Prometheus signal the phase-3 contraction gate reads — pin its
+    // absence.
+    assertNull(
+        header.get("kid"),
+        "HS256 tokens must NOT carry a kid — the {alg,kid} signal feeds the phase-3 contraction gate");
   }
 
   @Test
@@ -102,7 +114,9 @@ class JwtServiceTest {
             Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
             StandardCharsets.UTF_8);
     var header = new ObjectMapper().readTree(headerJson);
+    assertNotNull(header.get("alg"), "RS256 token header must carry an alg key");
     assertEquals("RS256", header.get("alg").asText(), "signer must pin RS256 explicitly");
+    assertNotNull(header.get("kid"), "RS256 token header must carry a kid key");
     assertEquals(
         SIGNING_KID, header.get("kid").asText(), "every RS256 token carries the pinned kid");
   }

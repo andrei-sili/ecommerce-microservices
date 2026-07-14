@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -93,8 +94,14 @@ class RefreshContinuityIntegrationTest extends AbstractIntegrationTest {
 
     // The fresh access token is RS256 with the pinned kid — the flip took effect on refresh.
     JsonNode header = decodeHeader(body.get("access_token").asText());
-    assertEquals("RS256", header.get("alg").asText());
-    assertEquals(SIGNING_KID, header.get("kid").asText());
+    assertNotNull(header.get("alg"), "refreshed access token header must carry an alg key");
+    assertEquals(
+        "RS256", header.get("alg").asText(), "refreshed access token must carry alg=RS256");
+    assertNotNull(header.get("kid"), "refreshed access token header must carry a kid key");
+    assertEquals(
+        SIGNING_KID,
+        header.get("kid").asText(),
+        "refreshed access token must carry the pinned kid");
 
     // Rotation still happens: the pre-flip refresh token is replaced (no session loss, but
     // rotated).
