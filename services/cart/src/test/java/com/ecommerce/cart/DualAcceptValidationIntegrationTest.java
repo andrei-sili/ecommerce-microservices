@@ -11,6 +11,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Slice 5e phase-1 validation matrix under the {@code HS256,RS256} allowlist, through the real
@@ -19,6 +21,14 @@ import org.junit.jupiter.params.provider.ValueSource;
  * row asserts the pinned four-field 401 envelope (indistinguishable causes) AND flat observability.
  */
 class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
+
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    // Pin the dual allowlist this matrix targets. Production now defaults to RS256-only (main
+    // application.yml, Slice 5e phase 3); this suite still proves the HS256+RS256 (rollback)
+    // posture, so it declares that allowlist explicitly rather than riding the shipped default.
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   private static final long USER_ID = 7L;
 

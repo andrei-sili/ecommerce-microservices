@@ -20,6 +20,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -32,6 +34,14 @@ import org.springframework.test.web.servlet.MvcResult;
  * mirror the User Service contract.
  */
 class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
+
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    // The valid-token rows here mint legacy HS256. Production defaults to RS256-only (main
+    // application.yml, Slice 5e phase 3); pin the dual (rollback) allowlist so HS256 stays accepted
+    // independent of the shipped default.
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   @Autowired private MockMvc mockMvc;
   @Autowired private CartRepository cartRepository;
