@@ -18,6 +18,10 @@ configMapGenerator:
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://user-db:5432/user_db
       - JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50
+      # Slice 5e phase-2 signer flip pinned as versioned config (phase-3 grace-clock anchor);
+      # rollback = HS256. Consumed by the user Deployment via envFrom user-config. Validators
+      # stay dual-accept (JWT_ACCEPTED_ALGS) until phase 3 — never flip both in one deploy.
+      - JWT_SIGNING_ALG=RS256
   - name: product-config
     literals:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://product-db:5432/product_db
