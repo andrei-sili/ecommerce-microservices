@@ -19,6 +19,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -34,6 +36,13 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   @Autowired private MockMvc mockMvc;
 
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
+
+  // The security regression rows authenticate with a legacy HS256 admin token; phase-3 flipped the
+  // yml default to RS256-only, so pin the dual allowlist to keep the HS256 path reachable here.
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   // 1. Unmapped collection-style path (public read) -> 404 RESOURCE_NOT_FOUND, full envelope,
   // application/json (not problem+json), no internals leaked.

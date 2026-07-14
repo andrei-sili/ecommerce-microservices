@@ -58,8 +58,11 @@ class PrometheusMetricsIT {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
+    // Phase-3 flipped the yml default to RS256-only; this suite exercises legacy HS256 tokens, so
+    // pin the dual allowlist explicitly for its baseline.
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
     // Override the yml public-key placeholder with a runtime-generated key so the dual-accept
-    // context boots (RS256 is enabled by default); this suite only exercises HS256 tokens.
+    // context boots (RS256 stays enabled); this suite only exercises HS256 tokens.
     registry.add(
         "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
     registry.add("security.internal-api-key", () -> "test-internal-api-key");
