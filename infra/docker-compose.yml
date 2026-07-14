@@ -143,7 +143,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://user-db:5432/${USER_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${USER_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Slice 5e phase-2 signer flip pinned as versioned config (phase-3 grace-clock anchor); rollback = set HS256, validators stay dual-accept (JWT_ACCEPTED_ALGS) until phase 3.
       JWT_SIGNING_ALG: RS256
       # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
@@ -182,7 +181,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://product-db:5432/${PRODUCT_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${PRODUCT_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
@@ -217,7 +215,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://cart-db:5432/${CART_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${CART_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${CART_DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
@@ -250,7 +247,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://order-db:5432/${ORDER_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${ORDER_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.
@@ -315,7 +311,6 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://payment-db:5432/${PAYMENT_DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${PAYMENT_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${PAYMENT_DB_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
       # Slice 5e — RS256 PUBLIC key as a read-only FILE mount (validation only; no private key).
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH:-/etc/jwt/public/jwt-rs256-public.pem}
       # Slice 5e phase-3a contraction pinned as config; rollback = remove this line -> dual default (HS256,RS256) from application.yml returns.

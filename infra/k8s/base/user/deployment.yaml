@@ -52,11 +52,6 @@ spec:
                 secretKeyRef:
                   name: ecommerce-secrets
                   key: USER_DB_PASSWORD
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: ecommerce-secrets
-                  key: JWT_SECRET
             - name: ADMIN_EMAIL
               valueFrom:
                 secretKeyRef:

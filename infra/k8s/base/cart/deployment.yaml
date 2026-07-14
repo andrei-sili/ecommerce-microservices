@@ -52,11 +52,6 @@ spec:
                 secretKeyRef:
                   name: ecommerce-secrets
                   key: CART_DB_PASSWORD
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: ecommerce-secrets
-                  key: JWT_SECRET
             # Slice 5e — RS256 public key path (validation only; no private key on consumers).
             - name: JWT_PUBLIC_KEY_PATH
               value: /etc/jwt/public/jwt-rs256-public.pem
