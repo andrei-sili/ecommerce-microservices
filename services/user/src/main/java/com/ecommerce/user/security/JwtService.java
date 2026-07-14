@@ -58,6 +58,9 @@ public class JwtService {
    */
   private static final String SIGNING_KID = "user-rs256-2026-07";
 
+  /** The only algorithms this issuer signs and this validator accepts; anything else fail-fasts. */
+  private static final Set<String> KNOWN_ALGS = Set.of("HS256", "RS256");
+
   private final SecretKey hmacKey;
   private final Map<String, RSAPublicKey> publicKeysByKid;
   private final boolean hs256Enabled;
@@ -89,9 +92,9 @@ public class JwtService {
     // validation are independent flags — user validates its own inbound tokens via the locator.
     String signingAlg =
         properties.signingAlg() == null
-            ? "HS256"
+            ? "RS256"
             : properties.signingAlg().trim().toUpperCase(Locale.ROOT);
-    if (!"HS256".equals(signingAlg) && !"RS256".equals(signingAlg)) {
+    if (!KNOWN_ALGS.contains(signingAlg)) {
       throw new IllegalStateException(
           "JWT_SIGNING_ALG="
               + properties.signingAlg()
@@ -195,7 +198,17 @@ public class JwtService {
     Set<String> normalized = new java.util.HashSet<>();
     for (String alg : algs) {
       if (alg != null && !alg.isBlank()) {
-        normalized.add(alg.trim().toUpperCase(Locale.ROOT));
+        String normalizedAlg = alg.trim().toUpperCase(Locale.ROOT);
+        // Reject a typo instead of silently dropping it: an unknown entry in a re-widening list
+        // would CONTRACT the allowlist (still fail-closed) but hide the operator's mistake — a
+        // login outage with no signal. Name the offending value so the deploy-time cause is clear.
+        if (!KNOWN_ALGS.contains(normalizedAlg)) {
+          throw new IllegalStateException(
+              "JWT_ACCEPTED_ALGS contains an unsupported algorithm '"
+                  + alg.trim()
+                  + "'; supported values are HS256, RS256");
+        }
+        normalized.add(normalizedAlg);
       }
     }
     if (normalized.isEmpty()) {
@@ -217,10 +230,15 @@ public class JwtService {
       // Name the branch that actually demands it: signing takes precedence (it cannot proceed
       // without the secret) over mere validation-allowlist membership.
       String reason = signsHs256 ? "the signer issues HS256" : "HS256 is in JWT_ACCEPTED_ALGS";
+      // Point operators at the real rollback path: phase 3 deleted the security.jwt.secret yml
+      // binding, so setting JWT_SECRET alone is a dead end. Re-enabling HS256 means restoring the
+      // binding (git revert of the phase-3 yml change) AND providing a NEW secret (the old one is
+      // burned once the wiring is gone).
       throw new IllegalStateException(
           "JWT_SECRET must be at least 32 bytes for HS256 (required because "
               + reason
-              + "); configure a strong secret via env");
+              + "); phase 3 removed the security.jwt.secret binding, so re-enabling HS256 needs a"
+              + " git revert of that yml change plus a NEW secret, not just setting the env var");
     }
     return Keys.hmacShaKeyFor(secretBytes);
   }
