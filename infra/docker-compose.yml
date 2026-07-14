@@ -144,6 +144,8 @@ services:
       SPRING_DATASOURCE_USERNAME: ${USER_DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      # Slice 5e phase-2 signer flip pinned as versioned config (phase-3 grace-clock anchor); rollback = set HS256, validators stay dual-accept (JWT_ACCEPTED_ALGS) until phase 3.
+      JWT_SIGNING_ALG: RS256
       # Slice 5e — RS256 key material delivered as read-only FILE mounts (never PEM-in-env:
       # compose vs --env-file newline semantics differ, moby#12997). user-service is the ONLY
       # signer, so it holds the PRIVATE key; its path is a hardcoded literal here (deliberately
