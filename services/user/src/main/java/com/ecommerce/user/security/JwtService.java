@@ -4,6 +4,7 @@ import com.ecommerce.user.config.JwtProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwsHeader;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
@@ -28,35 +29,49 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Issues HS256 access tokens and validates inbound tokens with dual-accept (Slice 5e phase 1).
+ * Issues access tokens and validates inbound tokens with dual-accept (Slice 5e).
  *
- * <p>Signing stays HS256 (the RS256 flip is phase 2). Validation routes by the JOSE {@code alg}
- * header through a pinned map — {@code RS256} → the kid's RSA public key, {@code HS256} → the
+ * <p>Signing is config-driven ({@code JWT_SIGNING_ALG}): {@code HS256} (default) signs with the
+ * legacy secret; {@code RS256} (phase-2 flip) signs with the mounted RSA private key and stamps
+ * {@code kid=user-rs256-2026-07}. Both paths pin the algorithm explicitly ({@code Jwts.SIG.HS256} /
+ * {@code Jwts.SIG.RS256}) — never single-arg {@code signWith}, which infers a stronger family on a
+ * larger key. The HS256 signing path is kept, not deleted, so a rollback flip is config-only.
+ *
+ * <p>Validation is an independent flag ({@code JWT_ACCEPTED_ALGS}) and routes by the JOSE {@code
+ * alg} header through a pinned map — {@code RS256} → the kid's RSA public key, {@code HS256} → the
  * legacy secret (only while it is in the allowlist), anything else → reject. There is no try/catch
  * fallback and the legacy secret is never derived from public-key bytes, so an {@code alg=HS256}
  * token HMAC-signed with the trusted public PEM (algorithm confusion) verifies against the legacy
- * secret and fails. Claims are exactly {@code sub}, {@code roles}, {@code iat}, {@code exp} — no
- * PII.
+ * secret and fails. Claims are exactly {@code iss}, {@code sub}, {@code roles}, {@code iat}, {@code
+ * exp} — no PII; the RS256 flip changes only the JOSE header and the signature.
  */
 @Service
 public class JwtService {
 
   private static final Logger AUDIT_LOG = LoggerFactory.getLogger("jwt.audit");
 
+  /**
+   * Dated key id stamped on every RS256 token, pinned by contract (§Token shape) and never reused.
+   * A future rotation to a new signing kid is a separate contract decision (backlog rotation
+   * probe).
+   */
+  private static final String SIGNING_KID = "user-rs256-2026-07";
+
   private final SecretKey hmacKey;
   private final Map<String, RSAPublicKey> publicKeysByKid;
   private final boolean hs256Enabled;
   private final boolean rs256Enabled;
+  private final boolean signRs256;
   private final JwtParser parser;
   private final MeterRegistry meterRegistry;
   private final long accessTtlSeconds;
   private final String issuer;
 
   /**
-   * The mounted signing key, validated at startup so the phase-2 RS256 signer flip is config-only.
-   * Held (not used) while {@code signing-alg} stays HS256; issuance still uses {@link #hmacKey}.
+   * The mounted signing key. Loaded and validated at startup unconditionally (user always mounts it
+   * in slice 5e), so an RS256 signer flip cannot start without a valid key. Used to sign when
+   * {@code signing-alg=RS256}; held otherwise so a rollback flip stays config-only.
    */
-  @SuppressWarnings("unused")
   private final RSAPrivateKey signingPrivateKey;
 
   public JwtService(JwtProperties properties, MeterRegistry meterRegistry) {
@@ -68,20 +83,24 @@ public class JwtService {
     this.hs256Enabled = accepted.contains("HS256");
     this.rs256Enabled = accepted.contains("RS256");
 
-    // Phase 1 signs HS256 only. Reject any other JWT_SIGNING_ALG at startup so an RS256 flip
-    // fail-fasts here instead of silently no-op'ing now (issuance is hardcoded HS256) or NPE'ing at
-    // the first /login once the secret is gone. The real signer flip lands in phase 2.
-    String signingAlg = properties.signingAlg() == null ? "HS256" : properties.signingAlg().trim();
-    if (!"HS256".equalsIgnoreCase(signingAlg)) {
+    // The issuer signs HS256 (default) or RS256 (the phase-2 flip, JWT_SIGNING_ALG=RS256).
+    // Any other value fail-fasts instead of silently signing the wrong alg. Signing and
+    // validation are independent flags — user validates its own inbound tokens via the locator.
+    String signingAlg =
+        properties.signingAlg() == null
+            ? "HS256"
+            : properties.signingAlg().trim().toUpperCase(Locale.ROOT);
+    if (!"HS256".equals(signingAlg) && !"RS256".equals(signingAlg)) {
       throw new IllegalStateException(
           "JWT_SIGNING_ALG="
-              + signingAlg
-              + " is not supported in this build; phase 1 signs HS256 only (the RS256 signer flip"
-              + " lands in phase 2)");
+              + properties.signingAlg()
+              + " is not supported; the user issuer signs HS256 or RS256 only");
     }
+    this.signRs256 = "RS256".equals(signingAlg);
 
-    // Signing is HS256, so the legacy secret is always required (it also validates HS256 tokens
-    // while HS256 is in the allowlist). hmacKey is therefore never null.
+    // hmacKey signs HS256 tokens (while the signer is HS256) and validates them (while HS256 is
+    // accepted); it stays required through phase 2. publicKeysByKid validates RS256. The private
+    // key signs RS256 once flipped, loaded unconditionally so the flip cannot start keyless.
     this.hmacKey = loadHmacKey(properties.secret(), hs256Enabled);
     this.publicKeysByKid = loadPublicKeys(properties.publicKeys(), rs256Enabled);
     this.signingPrivateKey = RsaPemKeys.loadPrivateKey(properties.privateKeyPath());
@@ -91,17 +110,27 @@ public class JwtService {
 
   public String issueAccessToken(Long userId, Set<String> roles) {
     Instant now = Instant.now();
-    return Jwts.builder()
-        .issuer(issuer)
-        .subject(String.valueOf(userId))
-        .claim("roles", List.copyOf(roles))
-        .issuedAt(java.util.Date.from(now))
-        .expiration(java.util.Date.from(now.plusSeconds(accessTtlSeconds)))
-        // Pin HS256 explicitly: single-arg signWith infers the strongest alg the key allows
-        // (a >48-byte secret yields HS384), which would break the documented HS256 contract and
-        // the alg observability tag. The RS256 flip is phase 2.
-        .signWith(hmacKey, Jwts.SIG.HS256)
-        .compact();
+    JwtBuilder builder =
+        Jwts.builder()
+            .issuer(issuer)
+            .subject(String.valueOf(userId))
+            .claim("roles", List.copyOf(roles))
+            .issuedAt(java.util.Date.from(now))
+            .expiration(java.util.Date.from(now.plusSeconds(accessTtlSeconds)));
+    if (signRs256) {
+      // Pin RS256 explicitly: single-arg signWith infers RS384/RS512 on a larger key (a 4096-bit
+      // key yields RS512), breaking the documented alg and the observability tag. The kid routes
+      // validators to the right public key (claims are unchanged — only the header + signature).
+      return builder
+          .header()
+          .keyId(SIGNING_KID)
+          .and()
+          .signWith(signingPrivateKey, Jwts.SIG.RS256)
+          .compact();
+    }
+    // Pin HS256 explicitly (same inference hazard: a >48-byte secret yields HS384). Kept as the
+    // rollback path (JWT_SIGNING_ALG=HS256) — never removed while the two flags stay independent.
+    return builder.signWith(hmacKey, Jwts.SIG.HS256).compact();
   }
 
   /**

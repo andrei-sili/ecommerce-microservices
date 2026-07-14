@@ -33,6 +33,17 @@ public final class JwtTestKeys {
   public static final KeyPair KEY_PAIR_B = generate(2048);
   public static final KeyPair KEY_PAIR_WRONG = generate(2048);
 
+  /**
+   * A 4096-bit signing key for the inference-drift pin: single-arg {@code signWith} would infer
+   * RS512 on this key, so an explicit {@code Jwts.SIG.RS256} is the only way the emitted header
+   * stays {@code RS256}.
+   */
+  public static final KeyPair KEY_PAIR_4096 = generate(4096);
+
+  public static final String PRIVATE_KEY_PATH_4096 =
+      writeTempKey(
+          "jwt-priv-4096", pemEncode("PRIVATE KEY", KEY_PAIR_4096.getPrivate().getEncoded()));
+
   /** SPKI DER bytes of key A's public key — one algorithm-confusion HMAC-key encoding. */
   public static final byte[] PUBLIC_KEY_DER_A = KEY_PAIR_A.getPublic().getEncoded();
 

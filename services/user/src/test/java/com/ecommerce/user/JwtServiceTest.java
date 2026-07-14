@@ -25,18 +25,32 @@ class JwtServiceTest {
   private static final String SECRET = JwtTestKeys.SECRET;
   private static final MeterRegistry REGISTRY = new SimpleMeterRegistry();
 
+  private static final String SIGNING_KID = "user-rs256-2026-07";
+
   private final JwtService jwtService = new JwtService(props(SECRET), REGISTRY);
 
   private static JwtProperties props(String secret) {
+    return props(secret, "HS256", JwtTestKeys.PRIVATE_KEY_PATH_A);
+  }
+
+  private static JwtProperties props(String secret, String signingAlg, String privateKeyPath) {
     return new JwtProperties(
         secret,
         900,
         604800,
         "user-service-test",
-        "HS256",
+        signingAlg,
         List.of("HS256", "RS256"),
-        JwtTestKeys.PRIVATE_KEY_PATH_A,
+        privateKeyPath,
         Map.of(JwtTestKeys.KID_A, JwtTestKeys.PUBLIC_KEY_PATH_A));
+  }
+
+  private static String headerAlg(String token) throws Exception {
+    String headerJson =
+        new String(
+            Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
+            StandardCharsets.UTF_8);
+    return new ObjectMapper().readTree(headerJson).get("alg").asText();
   }
 
   @Test
@@ -74,6 +88,57 @@ class JwtServiceTest {
             StandardCharsets.UTF_8);
     String alg = new ObjectMapper().readTree(headerJson).get("alg").asText();
     assertEquals("HS256", alg, "issuer must pin HS256 explicitly (phase 1); the RS256 flip is P2");
+  }
+
+  @Test
+  void issuedRs256TokenHeader_pinsRs256AndKid() throws Exception {
+    // Phase-2 flip: with signing-alg=RS256 the JOSE header must carry alg=RS256 AND the pinned kid.
+    JwtService rs256 =
+        new JwtService(props(SECRET, "RS256", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    String token = rs256.issueAccessToken(42L, Set.of("USER"));
+
+    String headerJson =
+        new String(
+            Base64.getUrlDecoder().decode(token.substring(0, token.indexOf('.'))),
+            StandardCharsets.UTF_8);
+    var header = new ObjectMapper().readTree(headerJson);
+    assertEquals("RS256", header.get("alg").asText(), "signer must pin RS256 explicitly");
+    assertEquals(
+        SIGNING_KID, header.get("kid").asText(), "every RS256 token carries the pinned kid");
+  }
+
+  @Test
+  void issuedRs256Token_pinsRs256_evenWith4096BitKey() throws Exception {
+    // Inference-drift pin: single-arg signWith would infer RS512 on a 4096-bit key. Only an
+    // explicit Jwts.SIG.RS256 keeps the header RS256 — reverting to single-arg turns this red.
+    JwtService rs256 =
+        new JwtService(props(SECRET, "RS256", JwtTestKeys.PRIVATE_KEY_PATH_4096), REGISTRY);
+    String token = rs256.issueAccessToken(42L, Set.of("USER"));
+    assertEquals(
+        "RS256", headerAlg(token), "RS256 must be pinned regardless of key size (not RS512)");
+  }
+
+  @Test
+  void issuedRs256Token_containsExactlyContractClaims_verifiedWithPublicKey() {
+    // Claim parity is unchanged by the flip: exactly {iss,sub,roles,iat,exp}, iss = configured
+    // issuer, verified against the RSA PUBLIC key (the real validation material).
+    JwtService rs256 =
+        new JwtService(props(SECRET, "RS256", JwtTestKeys.PRIVATE_KEY_PATH_A), REGISTRY);
+    String token = rs256.issueAccessToken(42L, Set.of("USER"));
+
+    Claims claims =
+        Jwts.parser()
+            .verifyWith(JwtTestKeys.KEY_PAIR_A.getPublic())
+            .build()
+            .parseSignedClaims(token)
+            .getPayload();
+
+    assertEquals(Set.of("iss", "sub", "roles", "iat", "exp"), claims.keySet());
+    assertEquals("user-service-test", claims.get("iss"), "iss must equal the configured issuer");
+    assertEquals("42", claims.getSubject());
+    assertEquals(List.of("USER"), claims.get("roles"));
+    assertTrue(claims.getIssuedAt() != null);
+    assertTrue(claims.getExpiration() != null);
   }
 
   @Test
