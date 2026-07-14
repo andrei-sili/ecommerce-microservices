@@ -21,11 +21,21 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** End-to-end cart flow against a real Postgres with the Product client stubbed (no real HTTP). */
 @Import(CartIntegrationTest.StubConfig.class)
 class CartIntegrationTest extends AbstractIntegrationTest {
+
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    // This suite presents legacy HS256 tokens as "a valid token" for the business flow. Production
+    // now defaults to RS256-only (main application.yml, Slice 5e phase 3); pin the dual (rollback)
+    // allowlist here so the HS256 path stays enabled independent of the shipped default.
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   @TestConfiguration
   static class StubConfig {

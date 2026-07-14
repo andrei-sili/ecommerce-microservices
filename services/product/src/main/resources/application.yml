@@ -37,10 +37,11 @@ server:
 
 security:
   jwt:
-    secret: ${JWT_SECRET}
-    # Slice 5e dual-accept: product validates both HS256 (legacy) and RS256 (kid-keyed). Product
-    # never signs — no private key here. The allowlist contracts to RS256 in phase 3.
-    accepted-algs: ${JWT_ACCEPTED_ALGS:HS256,RS256}
+    # Slice 5e phase-3 posture: product validates RS256 only (default below); it never signs, so no
+    # private key here. HS256 stays code-reachable behind the allowlist for an emergency rollback,
+    # but the legacy secret is deleted (fail-closed, D3) — re-widening needs a git revert plus a NEW
+    # secret, never a live env toggle. JwtProperties.secret binds null while HS256 is not accepted.
+    accepted-algs: ${JWT_ACCEPTED_ALGS:RS256}
     # Key material arrives as mounted files (paths in env, never PEM content). Provided by P1-INFRA.
     public-keys:
       user-rs256-2026-07: ${JWT_PUBLIC_KEY_PATH}

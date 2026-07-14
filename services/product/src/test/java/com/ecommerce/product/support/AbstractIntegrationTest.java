@@ -45,8 +45,8 @@ public abstract class AbstractIntegrationTest {
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("security.jwt.secret", () -> TestJwt.SECRET);
     // Wire the runtime-generated RSA public keys so every context boots with valid dual-accept
-    // material. Two kids back the rotation-coexistence proof. accepted-algs stays at the yml
-    // default (HS256,RS256); RS256-only / HS256-only suites override it themselves.
+    // material. Two kids back the rotation-coexistence proof. The yml default is RS256-only
+    // (phase 3); suites that exercise HS256 pin accepted-algs=HS256,RS256 (or HS256) themselves.
     registry.add(
         "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
     registry.add(

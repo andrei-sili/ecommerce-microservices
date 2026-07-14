@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /** End-to-end flow against a real Postgres: create category/product, list, filter, inventory. */
@@ -29,6 +31,13 @@ class ProductCatalogIT extends AbstractIntegrationTest {
   @Autowired private ObjectMapper objectMapper;
 
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
+
+  // The catalog flow authenticates with a legacy HS256 admin token; phase-3 flipped the yml default
+  // to RS256-only, so pin the dual allowlist to keep the HS256 path reachable for this suite.
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   @Test
   @Order(1)
