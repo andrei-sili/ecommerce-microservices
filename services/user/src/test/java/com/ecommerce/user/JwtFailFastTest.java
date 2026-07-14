@@ -151,4 +151,85 @@ class JwtFailFastTest {
             IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
     assertTrue(ex.getMessage().contains("could not be read"), ex.getMessage());
   }
+
+  @Test
+  void signingHs256_acceptRs256Only_failsFast_crossCheck() {
+    // Finding 2 (self-DoS): signing HS256 while accepting RS256-only mints tokens the same service
+    // then 401s. Fail fast at startup, naming both properties AND both values (never key material).
+    JwtProperties props =
+        new JwtProperties(
+            JwtTestKeys.SECRET,
+            900,
+            604800,
+            "user-service-test",
+            "HS256",
+            List.of("RS256"),
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
+    String message = ex.getMessage();
+    assertTrue(message.contains("JWT_SIGNING_ALG"), message);
+    assertTrue(message.contains("JWT_ACCEPTED_ALGS"), message);
+    assertTrue(message.contains("HS256"), message);
+    assertTrue(message.contains("RS256"), message);
+    assertFalse(
+        message.contains("MII"), "cross-check message must never echo key material: " + message);
+  }
+
+  @Test
+  void signingRs256_acceptHs256Only_failsFast_crossCheck() {
+    // The reverse self-DoS combo: signing RS256 while accepting HS256-only. The cross-check must
+    // fire in this direction too, naming both properties and both values.
+    JwtProperties props =
+        new JwtProperties(
+            JwtTestKeys.SECRET,
+            900,
+            604800,
+            "user-service-test",
+            "RS256",
+            List.of("HS256"),
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
+    String message = ex.getMessage();
+    assertTrue(message.contains("JWT_SIGNING_ALG"), message);
+    assertTrue(message.contains("JWT_ACCEPTED_ALGS"), message);
+    assertTrue(message.contains("HS256"), message);
+    assertTrue(message.contains("RS256"), message);
+  }
+
+  @Test
+  void hs256AcceptedWhileSigningRs256_withoutSecret_failsFast_namingAllowlistBranch() {
+    // Signer is RS256 but HS256 is still in the allowlist (a valid mid-migration state), so the
+    // secret is required only to VALIDATE inbound HS256. The reason must name the allowlist branch,
+    // not the signer — the corner the old unconditional "the signer still issues HS256" got wrong.
+    JwtProperties props =
+        new JwtProperties(
+            "",
+            900,
+            604800,
+            "user-service-test",
+            "RS256",
+            DUAL,
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    IllegalStateException ex =
+        assertThrows(
+            IllegalStateException.class, () -> new JwtService(props, new SimpleMeterRegistry()));
+    assertTrue(ex.getMessage().contains("JWT_SECRET"), ex.getMessage());
+    assertTrue(ex.getMessage().contains("HS256 is in JWT_ACCEPTED_ALGS"), ex.getMessage());
+  }
+
+  @Test
+  void signHs256_withoutSecret_failsFast_namingSignerBranch() {
+    // Signer issues HS256 (the emergency-rollback posture) with HS256 also accepted: the secret is
+    // required to SIGN, so the reason names the signer branch — pins the corrected string (the old
+    // code said "the signer still issues HS256" unconditionally, even when the signer did not).
+    String message = failMessage("", DUAL, JwtTestKeys.PRIVATE_KEY_PATH_A, VALID_PUBLIC);
+    assertTrue(message.contains("the signer issues HS256"), message);
+  }
 }

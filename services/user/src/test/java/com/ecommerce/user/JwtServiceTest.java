@@ -193,6 +193,30 @@ class JwtServiceTest {
   }
 
   @Test
+  void rs256OnlyWithSecretAbsent_constructsAndIssuesRs256() throws Exception {
+    // The exact phase-3 production shape: signer RS256, allowlist RS256-only, and NO legacy secret
+    // (the yml `secret:` line is deleted → JwtProperties.secret binds null). The service must
+    // construct (hmacKey null, never demanded) and still issue a valid RS256 token — untested
+    // today.
+    JwtProperties props =
+        new JwtProperties(
+            null,
+            900,
+            604800,
+            "user-service-test",
+            "RS256",
+            List.of("RS256"),
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            Map.of(JwtTestKeys.KID_A, JwtTestKeys.PUBLIC_KEY_PATH_A));
+    JwtService service = new JwtService(props, new SimpleMeterRegistry());
+
+    JsonNode header = decodeHeader(service.issueAccessToken(42L, Set.of("USER")));
+    assertEquals("RS256", header.get("alg").asText(), "RS256-only service must sign RS256");
+    assertEquals(
+        SIGNING_KID, header.get("kid").asText(), "RS256-only service still stamps the pinned kid");
+  }
+
+  @Test
   void parse_roundTripsUserAndRoles() {
     String token = jwtService.issueAccessToken(7L, Set.of("ADMIN", "USER"));
     JwtService.AuthenticatedUser user = jwtService.parse(token);

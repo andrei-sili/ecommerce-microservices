@@ -13,13 +13,16 @@ import org.springframework.test.context.DynamicPropertySource;
 /**
  * Allowlist contraction: with {@code accepted-algs=RS256}, a fresh legacy HS256 token is rejected
  * and algorithm-confusion is closed via the HS256 branch being disabled entirely (a different
- * mechanism than the dual build, where it fails signature verification). Proves the phase-3 posture
- * ahead of time (the alg-confusion rows are required in BOTH builds by contract).
+ * mechanism than the dual build, where it fails signature verification). This is the full phase-3
+ * production posture — signer AND validator on RS256 only — so {@code signing-alg=RS256} is pinned
+ * alongside the allowlist (the startup cross-check forbids signing an alg the service then
+ * rejects).
  */
 class Rs256OnlyValidationIntegrationTest extends AbstractDualAcceptTest {
 
   @DynamicPropertySource
   static void contractAllowlist(DynamicPropertyRegistry registry) {
+    registry.add("security.jwt.signing-alg", () -> "RS256");
     registry.add("security.jwt.accepted-algs", () -> "RS256");
   }
 
