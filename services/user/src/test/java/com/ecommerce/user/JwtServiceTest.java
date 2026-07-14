@@ -217,6 +217,30 @@ class JwtServiceTest {
   }
 
   @Test
+  void nullSigningAlg_defaultsToRs256_notHs256() throws Exception {
+    // The in-code fallback for a null signing-alg must match the yml default (RS256), not the old
+    // HS256. With HS256 and RS256 both accepted a null signing-alg constructs either way, so this
+    // pins the emitted header: RS256 (new default), never HS256 (the removed inconsistency).
+    JwtProperties props =
+        new JwtProperties(
+            SECRET,
+            900,
+            604800,
+            "user-service-test",
+            null,
+            List.of("HS256", "RS256"),
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            Map.of(JwtTestKeys.KID_A, JwtTestKeys.PUBLIC_KEY_PATH_A));
+    JwtService service = new JwtService(props, new SimpleMeterRegistry());
+
+    JsonNode header = decodeHeader(service.issueAccessToken(42L, Set.of("USER")));
+    assertEquals(
+        "RS256", header.get("alg").asText(), "null signing-alg must default to RS256, not HS256");
+    assertEquals(
+        SIGNING_KID, header.get("kid").asText(), "null-default RS256 token still carries the kid");
+  }
+
+  @Test
   void parse_roundTripsUserAndRoles() {
     String token = jwtService.issueAccessToken(7L, Set.of("ADMIN", "USER"));
     JwtService.AuthenticatedUser user = jwtService.parse(token);

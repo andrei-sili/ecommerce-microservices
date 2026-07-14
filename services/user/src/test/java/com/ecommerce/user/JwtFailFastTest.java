@@ -232,4 +232,30 @@ class JwtFailFastTest {
     String message = failMessage("", DUAL, JwtTestKeys.PRIVATE_KEY_PATH_A, VALID_PUBLIC);
     assertTrue(message.contains("the signer issues HS256"), message);
   }
+
+  @Test
+  void hs256WithoutSecret_message_pointsAtRollbackPath_notEnvDeadEnd() {
+    // Item 1: the ≥32-byte failure must guide operators to the REAL rollback — restore the deleted
+    // security.jwt.secret binding (git revert) plus a NEW secret — not the dead-end "set an env
+    // var". Phase 3 removed the yml binding, so JWT_SECRET alone now resolves to nothing.
+    String message = failMessage("", DUAL, JwtTestKeys.PRIVATE_KEY_PATH_A, VALID_PUBLIC);
+    assertTrue(message.contains("security.jwt.secret"), message);
+    assertTrue(message.contains("git revert"), message);
+    assertFalse(message.contains("configure a strong secret via env"), message);
+  }
+
+  @Test
+  void unknownAcceptedAlg_failsFast_namingOffendingValue() {
+    // Item 3: a typo in JWT_ACCEPTED_ALGS must fail fast, not silently contract the allowlist (a
+    // fail-closed but invisible login outage). Name the offending value AND the supported set.
+    String message =
+        failMessage(
+            JwtTestKeys.SECRET,
+            List.of("RS256", "FOO256"),
+            JwtTestKeys.PRIVATE_KEY_PATH_A,
+            VALID_PUBLIC);
+    assertTrue(message.contains("JWT_ACCEPTED_ALGS"), message);
+    assertTrue(message.contains("FOO256"), message);
+    assertTrue(message.contains("HS256, RS256"), message);
+  }
 }
