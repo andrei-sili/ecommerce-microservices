@@ -196,7 +196,7 @@ pinned to `prometheus`/`loki` by `dashboards/normalize.py`. Re-fetch/regenerate 
 - The overlay's `secretGenerator` reads `secret.env` into **one** `ecommerce-secrets` Secret (content-hash
   suffix → editing a value auto-rolls the dependent pods). Each workload pulls **only the keys it needs**
   via `valueFrom.secretKeyRef`, so a service's container env never carries another service's credentials
-  (cart's env has no payment keys; product/order share `JWT_SECRET`/`INTERNAL_API_KEY` by design;
+  (cart's env has no payment keys; product/order share `INTERNAL_API_KEY` by design;
   notification's DSN is assembled in-pod from its DB user/password — the password is never a literal in any
   committed file).
 - Every workload sets **`automountServiceAccountToken: false`** (none calls the K8s API). With no SA token

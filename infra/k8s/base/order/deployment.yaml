@@ -52,11 +52,6 @@ spec:
                 secretKeyRef:
                   name: ecommerce-secrets
                   key: ORDER_DB_PASSWORD
-            - name: JWT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: ecommerce-secrets
-                  key: JWT_SECRET
             - name: INTERNAL_API_KEY
               valueFrom:
                 secretKeyRef:
