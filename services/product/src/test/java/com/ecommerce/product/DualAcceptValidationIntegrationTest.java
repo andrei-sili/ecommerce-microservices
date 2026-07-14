@@ -13,6 +13,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Slice 5e phase-1 validation matrix under the {@code HS256,RS256} allowlist, through the real
@@ -24,6 +26,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
 
   private static final String SUBJECT = "1";
+
+  // Phase-3 flipped the yml default to RS256-only; this phase-1 matrix exercises legacy HS256 rows,
+  // so it pins the dual allowlist for its own baseline (like the HS256-only / RS256-only suites).
+  @DynamicPropertySource
+  static void dualAllowlist(DynamicPropertyRegistry registry) {
+    registry.add("security.jwt.accepted-algs", () -> "HS256,RS256");
+  }
 
   @Test
   void happyLegacyHs256_returns201_countsAndAudits() throws Exception {
