@@ -1,6 +1,13 @@
-# Kong API Gateway — DB-less declarative config (Wave 5b, Kubernetes edge).
+# Kong API Gateway — DB-less declarative config (Wave 5b, Kubernetes edge; Slice 5e phase-4).
 #
-# This is the K8s-specific config, SEPARATE from the Compose infra/kong/kong.yml.
+# TEMPLATE — NOT the file Kong loads. `infra/k8s/up.sh` (and CI / `make k8s-validate`) render this
+# via `infra/scripts/render-kong.sh`, injecting the local RS256 PUBLIC key into the
+# `rsa_public_key` placeholder below and writing the rendered `base/kong/kong.yml` (gitignored)
+# that the `kong-config` configMapGenerator reads. Rendered INTO base/kong/ because kustomize's
+# root-only load restrictor forbids the overlay from reading a base file. The placeholder is an
+# invalid PEM on purpose: `kong config parse` FAILS on this raw template.
+#
+# This is the K8s-specific config, SEPARATE from the Compose infra/kong/kong.tpl.yml.
 # Same routes/plugins, different routing substrate: on K8s each service points
 # directly at its ClusterIP Service URL and there are NO `upstreams` / active
 # health checks (deleted vs Wave 4).
@@ -10,9 +17,12 @@
 # KEEPS validating JWT / INTERNAL_API_KEY / webhook HMAC locally — Kong is an outer
 # gate, never the sole gate.
 #
-# Auth posture = Option A: Kong is NOT given JWT_SECRET. It does routing + per-IP rate
-# limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
-# Services validate the JWT signature/expiry themselves (unchanged). NO secrets in this file.
+# Auth posture (phase-4): Kong validates the RS256 signature + `exp` at the edge on the protected
+# routes with the PUBLIC key (jwt plugin per route, never global). It is STILL never given
+# JWT_SECRET and never the private key — a public key cannot forge, only verify. Services keep
+# validating the JWT signature/expiry themselves (defense-in-depth, unchanged). Kong does routing +
+# per-IP rate limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
+# The ONLY key material here is the PUBLIC PEM injected at render; no secret ever lands in this file.
 #
 # Routing + health gating are NATIVE to Kubernetes — Consul is gone:
 #   - CoreDNS resolves each `<service>:<port>` to a ClusterIP (the Service object IS the registry).
@@ -59,22 +69,51 @@ services:
           - GET
           - PUT
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              uri_param_names: []
+              header_names:
+                - authorization
+              run_on_preflight: false
+              maximum_expiration: 960
 
   - name: product-service
     url: http://product-service:8082
     routes:
       # No route for /api/v1/inventory/* -> internal-only (isolation by omission -> 404).
-      - name: products
+      # Product reads are PUBLIC by contract, writes are token-protected. Same paths, split by
+      # method into two routes: products-read (GET, no jwt) + products-write (mutations, jwt).
+      # HEAD is listed on neither (GET-only reads per contract) so it keeps 404-ing at the edge.
+      - name: products-read
         paths:
           - /api/v1/products
           - /api/v1/categories
         methods:
           - GET
+        strip_path: false
+      - name: products-write
+        paths:
+          - /api/v1/products
+          - /api/v1/categories
+        methods:
           - POST
           - PUT
           - PATCH
           - DELETE
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              uri_param_names: []
+              header_names:
+                - authorization
+              run_on_preflight: false
+              maximum_expiration: 960
 
   - name: cart-service
     url: http://cart-service:8083
@@ -88,6 +127,16 @@ services:
           - PUT
           - DELETE
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              uri_param_names: []
+              header_names:
+                - authorization
+              run_on_preflight: false
+              maximum_expiration: 960
 
   - name: order-service
     url: http://order-service:8084
@@ -100,6 +149,16 @@ services:
           - POST
           - PATCH
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              uri_param_names: []
+              header_names:
+                - authorization
+              run_on_preflight: false
+              maximum_expiration: 960
 
   - name: payment-service
     url: http://payment-service:8085
@@ -131,6 +190,9 @@ services:
           - name: request-termination
             config:
               status_code: 404
+      # jwt goes on `payments` ONLY, never on payments-webhook-block: the block route is a
+      # separate, higher-specificity match that request-terminates 404 before any jwt runs, so
+      # the webhook stays a 404 (never a 401 route-existence leak). Never make jwt global.
       - name: payments
         paths:
           - /api/v1/payments
@@ -138,6 +200,30 @@ services:
           - GET
           - POST
         strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              uri_param_names: []
+              header_names:
+                - authorization
+              run_on_preflight: false
+              maximum_expiration: 960
+
+# Consumer + RS256 credential (public material — a public key verifies, it cannot forge). Kong
+# selects the credential by the token's `iss` claim (default key_claim_name) matching `key`
+# below; the `secret` field is unused for RS256 (a mandatory schema field) and is a dummy that
+# is NEVER the legacy JWT_SECRET. rsa_public_key is injected by render-kong.sh — the placeholder
+# is an invalid PEM so `kong config parse` fails on the raw template.
+consumers:
+  - username: user-service
+    jwt_secrets:
+      - key: "user-service"
+        algorithm: RS256
+        rsa_public_key: |
+          __JWT_RS256_PUBLIC_KEY_PEM__
+        secret: "unused-dummy"
 
 # Global plugins (no service/route binding) — apply to every route unless a more
 # specific (route-scoped) plugin of the same name overrides them.
@@ -184,8 +270,10 @@ plugins:
   # Wave 5c: expose Kong metrics on the Status API (:8100/metrics). Both status_code +
   # latency metrics are opt-in in Kong 3.x (off => empty panels). upstream_health_metrics
   # is off because 5b deleted the `upstreams` block (the metric family would be empty and
-  # misleading); per_consumer is off (Option-A Kong has no consumers). Scraped in-cluster
-  # via the separate kong-metrics ClusterIP Service — :8100 is NEVER a NodePort.
+  # misleading); per_consumer stays off DELIBERATELY — phase-4 adds the single user-service
+  # consumer, but there is exactly one, so per-consumer metric fan-out adds cardinality with
+  # no signal. Scraped in-cluster via the separate kong-metrics ClusterIP Service —
+  # :8100 is NEVER a NodePort.
   - name: prometheus
     config:
       status_code_metrics: true

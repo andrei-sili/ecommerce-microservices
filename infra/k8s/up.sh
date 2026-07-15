@@ -132,6 +132,18 @@ fi
 [ -f "$KEYS/jwt-rs256-public.pem" ] || \
   openssl pkey -in "$KEYS/jwt-rs256-private.pem" -pubout -out "$KEYS/jwt-rs256-public.pem"
 
+# --- 5e-b. render Kong's declarative config with the local public key -------
+# The committed base/kong/kong.tpl.yml carries an invalid-PEM placeholder; render it INTO
+# base/kong/ (the configMapGenerator input — the overlay can't read a base file under the
+# kustomize load restrictor) so the gitignored base/kong/kong.yml is what kustomize hashes.
+# Fail-closed: render-kong.sh aborts if the placeholder survives, and Kong readiness never
+# goes green on a bad config anyway.
+log "rendering base/kong/kong.yml from template (RS256 public key inlined)"
+bash "$INFRA_DIR/scripts/render-kong.sh" \
+  --template "$SCRIPT_DIR/base/kong/kong.tpl.yml" \
+  --out "$SCRIPT_DIR/base/kong/kong.yml" \
+  --public-key "$KEYS/jwt-rs256-public.pem"
+
 # --- 6. apply ---------------------------------------------------------------
 log "applying overlays/local"
 kubectl apply -k "$OVERLAY"
