@@ -113,7 +113,10 @@ req GET /api/v1/orders; expect_code "no-token /orders" 401; expect_body "no-toke
 req GET "/api/v1/orders?jwt=$(mint_rs256 "$WORK/wrong.pem" "$ISS" "$(( $(now) + 300 ))")"
 expect_code "?jwt= only /orders" 401; expect_body "?jwt= only /orders" '{"message":"Unauthorized"}'
 
-# CORS preflight to a protected route must NOT be 401 (run_on_preflight: false + cors short-circuit).
+# OPTIONS preflight to a protected route must NOT be 401. On this topology no route lists OPTIONS,
+# so it returns 404 (no route matched, before any plugin) — not a CORS 200 short-circuit — which
+# still satisfies the "not 401" contract pin and is unchanged from pre-phase-4. run_on_preflight:
+# false is belt-and-braces if a route ever lists OPTIONS.
 req OPTIONS /api/v1/orders -H 'Origin: https://shop.example.com' -H 'Access-Control-Request-Method: GET'
 expect_not_401 "OPTIONS preflight /orders"
 
@@ -133,9 +136,9 @@ req GET /api/v1/users/me -H "Authorization: Bearer $(mint_rs256 "$WORK/wrong.pem
 expect_code "tampered-signature token" 401; expect_body "tampered-signature token" '{"message":"Invalid signature"}'
 
 # Legacy HS256 token -> 401, never 2xx (Kong enforces the credential's RS256 algorithm). The body
-# ("Invalid algorithm") is a 5th Kong-native shape; the contract pins only the status here.
+# {"message":"Invalid algorithm"} is the 5th Kong-native shape, pinned in the contract (2026-07-15).
 req GET /api/v1/users/me -H "Authorization: Bearer $(mint_hs256 'any-burned-secret' "$ISS" "$(( $(now) + 300 ))")"
-expect_code "legacy HS256 token" 401; expect_body "legacy HS256 token (record-only)" '{"message":"Invalid algorithm"}'
+expect_code "legacy HS256 token" 401; expect_body "legacy HS256 token" '{"message":"Invalid algorithm"}'
 
 # Expired but validly signed -> exp claim-check shape. Needs the Kong-matching private key.
 if [ -n "$PRIV" ]; then

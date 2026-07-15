@@ -28,7 +28,7 @@ log() { printf 'render-kong: %s\n' "$*"; }
 render() {
   local template=$1 out=$2 pubkey=$3
   [ -f "$template" ] || die "template not found: $template"
-  [ -f "$pubkey" ]   || die "public key not found: $pubkey (generate it first — see runbook § JWT keys)"
+  [ -s "$pubkey" ]   || die "public key missing or empty: $pubkey (generate it first — see runbook § JWT keys)"
   grep -q "$PLACEHOLDER" "$template" \
     || die "template $template has no $PLACEHOLDER placeholder — refusing to render blindly"
 

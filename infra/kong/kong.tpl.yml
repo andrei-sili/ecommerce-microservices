@@ -16,6 +16,11 @@
 # per-IP rate limiting + internal-route isolation + trust-header hygiene + CORS + request-size limit.
 # The ONLY key material here is the PUBLIC PEM injected at render; no secret ever lands in this file.
 #
+# OPTIONS preflight to a protected route currently returns 404, NOT a CORS 200 short-circuit: no
+# route lists OPTIONS, so nothing matches before any plugin runs — and crucially never 401
+# (unchanged from pre-phase-4). run_on_preflight: false is belt-and-braces for if a protected route
+# ever lists OPTIONS; a real browser SPA would add OPTIONS to routes (Lead backlog, not this slice).
+#
 # Routing resolves through Docker DNS, health-gated by Kong's OWN active health checks: each
 # service `host` points at a Kong `upstream` whose single target is the Docker service name +
 # app port (`<svc>:<port>`), always resolvable on ecommerce-net via Docker's embedded resolver
