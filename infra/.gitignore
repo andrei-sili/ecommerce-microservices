@@ -7,3 +7,10 @@ docker-compose.override.yml
 # directory is ignored so no PEM ever reaches the public repo. Generate with the runbook
 # § "JWT keys" recipe (openssl genpkey / openssl pkey -pubout); k8s bring-up + CI seed it.
 keys/
+
+# Rendered Kong declarative config (Slice 5e phase-4) — produced from kong.tpl.yml by
+# render-kong.sh with the LOCAL public key inlined. The template is tracked; the rendered
+# file carries key material and is per-deployment, so it is NEVER committed. The distinct
+# names keep the bind-mount / configMapGenerator pointed only ever at the rendered file.
+kong/kong.yml
+k8s/base/kong/kong.yml

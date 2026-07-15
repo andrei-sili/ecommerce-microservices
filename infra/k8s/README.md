@@ -89,6 +89,12 @@ kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672        # RabbitMQ man
   configs exist by necessity: this K8s one points `services[].url` at ClusterIP names with **no**
   `upstreams`/active checks; the Compose `infra/kong/kong.yml` keeps them (Docker DNS resolves
   dead containers, K8s readiness does not).
+- **Rendered, not committed (Slice 5e phase-4):** the repo tracks `base/kong/kong.tpl.yml`; the
+  `configMapGenerator` reads the **rendered** `base/kong/kong.yml` (gitignored), which
+  `up.sh`/`make k8s-validate`/CI produce via `infra/scripts/render-kong.sh` by inlining the local
+  RS256 **public** key into the template's `rsa_public_key` placeholder. Rendered INTO `base/kong/`
+  because the kustomize load restrictor forbids the overlay from reading a base file. The
+  placeholder is an invalid PEM, so `kong config parse` (a CI gate) rejects an un-rendered template.
 - **Down-edge is `502`, not `503`.** When a routed Service has **zero Ready** endpoints, kube-proxy
   `REJECT`s the connection and Kong returns **`502 Bad Gateway`** (never `500`, never a stale
   `200`); it auto-recovers to `200` once the pod is Ready again, for any outage length, with no
@@ -98,7 +104,16 @@ kubectl -n ecommerce port-forward svc/rabbitmq 15672:15672        # RabbitMQ man
 - **Edge gates (carried from Wave 4):** internal-route isolation by omission (`/api/v1/inventory/*`
   → 404), the case-insensitive `/api/v1/payments/webhook` 404 block, 5/min cap on
   `POST /api/v1/auth/login` over the global 120/min, trust-header strip, CORS, 5 MB size limit,
-  `correlation-id`. Auth is Option A: Kong holds **no** `JWT_SECRET`; each service validates locally.
+  `correlation-id`.
+- **Edge JWT (Slice 5e phase-4):** Kong now validates the RS256 signature + `exp` at the edge on
+  the protected routes (`users`, `products-write`, `cart`, `orders`, `payments`) via a per-route
+  `jwt` plugin bound to the single `user-service` consumer. Product **reads** stay public — the old
+  `products` route is split into `products-read` (GET, no token) + `products-write` (mutations,
+  token). Kong still holds **no** `JWT_SECRET` and **never** the private key — only the **public**
+  key, which verifies but cannot forge. Each service **still** validates the JWT itself
+  (defense-in-depth, unchanged); Kong is an outer gate, never the sole gate. The two Kong-native
+  401 bodies (`{"message":"Unauthorized"}`, `{"exp":"token expired"}`, …) are an OSS limitation
+  documented in `agent_docs/api_contracts.md`.
 
 ## Observability (Wave 5c) — metrics + logs, ClusterIP-only
 
