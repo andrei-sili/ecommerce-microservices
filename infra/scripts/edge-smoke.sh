@@ -135,8 +135,9 @@ expect_body "wrong-iss token" "{\"message\":\"No credentials found for given 'is
 req GET /api/v1/users/me -H "Authorization: Bearer $(mint_rs256 "$WORK/wrong.pem" "$ISS" "$(( $(now) + 300 ))")"
 expect_code "tampered-signature token" 401; expect_body "tampered-signature token" '{"message":"Invalid signature"}'
 
-# Legacy HS256 token -> 401, never 2xx (Kong enforces the credential's RS256 algorithm). The body
-# {"message":"Invalid algorithm"} is the 5th Kong-native shape, pinned in the contract (2026-07-15).
+# Legacy HS256 token -> 401, never 2xx. Body pinned as the contract's 5th binding Kong-native 401
+# shape (api_contracts.md §5e, 2026-07-15 amendment). Rejection is credential-algorithm-based on
+# 3.9.3, so this also covers alg-confusion (HMAC keyed with the public PEM) and any non-RS256.
 req GET /api/v1/users/me -H "Authorization: Bearer $(mint_hs256 'any-burned-secret' "$ISS" "$(( $(now) + 300 ))")"
 expect_code "legacy HS256 token" 401; expect_body "legacy HS256 token" '{"message":"Invalid algorithm"}'
 

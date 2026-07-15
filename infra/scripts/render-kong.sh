@@ -31,6 +31,11 @@ render() {
   [ -s "$pubkey" ]   || die "public key missing or empty: $pubkey (generate it first — see runbook § JWT keys)"
   grep -q "$PLACEHOLDER" "$template" \
     || die "template $template has no $PLACEHOLDER placeholder — refusing to render blindly"
+  # Fail-closed on a directory at $out: Docker's short-syntax bind-mount creates the mount source
+  # as a DIRECTORY when a bare `docker compose up` runs before the first render. Without this guard
+  # `mv` would move the temp file INTO that directory and exit 0 — a false "rendered" success in the
+  # exact first-touch failure mode this template split introduces.
+  [ -d "$out" ] && die "output path is a directory: $out — Docker likely created it as a bind-mount source before the first render. Delete it (rm -rf '$out') and re-run render-kong.sh."
 
   local tmp="$out.tmp.$$"
   awk -v pemfile="$pubkey" -v placeholder="$PLACEHOLDER" '
@@ -49,7 +54,7 @@ render() {
     rm -f "$tmp"
     die "placeholder survived rendering $out — the public key was not injected (fail-closed)"
   fi
-  mv "$tmp" "$out"
+  mv -T "$tmp" "$out"  # -T: never move INTO a dir (belt-and-braces with the [ -d ] guard above)
   log "rendered $out from $(basename "$template") (public key: $pubkey)"
 }
 
