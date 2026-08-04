@@ -2,6 +2,7 @@ package com.ecommerce.cart.client;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.findAll;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.matching;
@@ -21,6 +22,7 @@ import com.ecommerce.cart.support.TestJwt;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
 import com.github.tomakehurst.wiremock.junit5.WireMockTest;
+import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
@@ -53,6 +55,10 @@ class RestProductClientWireTest {
       }
       """;
 
+  /** The one snapshot the wire must produce for {@link #PRODUCT_JSON} — compared as a whole. */
+  private static final ProductSnapshot EXPECTED_SNAPSHOT =
+      new ProductSnapshot(42L, "Black T-Shirt", new BigDecimal("19.99"), "EUR");
+
   private RestProductClient clientFor(String baseUrl) {
     ProductClientProperties properties = new ProductClientProperties(baseUrl, 2000, 3000);
     RestClient restClient = new ProductClientConfig().productRestClient(properties);
@@ -77,6 +83,23 @@ class RestProductClientWireTest {
             .withHeader("Authorization", equalTo(bearer)));
   }
 
+  /**
+   * Exact request-byte pin. The lookup is a bodyless GET, so "exact body equality" here means the
+   * body is exactly empty and no {@code Content-Type} is negotiated; a serialization default that
+   * starts attaching a request body would still satisfy a substring assertion, and would still be a
+   * contract break at the Product boundary.
+   */
+  @Test
+  void productLookup_isExactlyOneBodylessGet(WireMockRuntimeInfo wm) {
+    stubFor(get(urlEqualTo("/api/v1/products/42")).willReturn(okJson(PRODUCT_JSON)));
+
+    clientFor(wm.getHttpBaseUrl()).fetchAvailableProduct(42, userBearer());
+
+    verify(1, getRequestedFor(urlEqualTo("/api/v1/products/42")).withoutHeader("Content-Type"));
+    assertThat(findAll(getRequestedFor(urlEqualTo("/api/v1/products/42"))).get(0).getBodyAsString())
+        .isEmpty();
+  }
+
   @Test
   void parsesSnakeCaseProductIntoSnapshot(WireMockRuntimeInfo wm) {
     stubFor(get(urlEqualTo("/api/v1/products/42")).willReturn(okJson(PRODUCT_JSON)));
@@ -84,10 +107,32 @@ class RestProductClientWireTest {
     ProductSnapshot snapshot =
         clientFor(wm.getHttpBaseUrl()).fetchAvailableProduct(42, userBearer());
 
-    assertThat(snapshot.productId()).isEqualTo(42L);
-    assertThat(snapshot.productName()).isEqualTo("Black T-Shirt");
-    assertThat(snapshot.unitPrice()).isEqualByComparingTo("19.99");
-    assertThat(snapshot.currency()).isEqualTo("EUR");
+    // Whole-record equality pins the FULL property set: a component that changes value, gains a
+    // null, or loses its scale fails here, where per-field assertions would each still pass.
+    assertThat(snapshot).isEqualTo(EXPECTED_SNAPSHOT);
+    assertThat(snapshot.unitPrice().scale()).isEqualTo(2);
+  }
+
+  /**
+   * The Product contract is allowed to grow fields. Deserialization must ignore them and produce a
+   * snapshot EQUAL to the one built from the lean body — the assertion a {@code contains}-style
+   * check cannot make, because it passes precisely when extra fields appear.
+   */
+  @Test
+  void unknownResponseFields_areIgnored_snapshotStaysExact(WireMockRuntimeInfo wm) {
+    String withExtraFields =
+        PRODUCT_JSON.replace(
+            "\"available\": true",
+            """
+            "available": true,
+                "discount_percent": 15,
+                "warehouse": { "id": 9, "code": "EU-WEST" }""");
+    stubFor(get(urlEqualTo("/api/v1/products/42")).willReturn(okJson(withExtraFields)));
+
+    ProductSnapshot snapshot =
+        clientFor(wm.getHttpBaseUrl()).fetchAvailableProduct(42, userBearer());
+
+    assertThat(snapshot).isEqualTo(EXPECTED_SNAPSHOT);
   }
 
   @Test
