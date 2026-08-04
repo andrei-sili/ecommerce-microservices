@@ -5,7 +5,10 @@ WORKDIR /build
 
 COPY pyproject.toml ./
 
-RUN pip install --no-cache-dir --upgrade pip \
+# setuptools is upgraded, not just pip: python:3.12-slim ships 70.3.0, which carries
+# CVE-2025-47273 (path traversal). site-packages is copied wholesale into the runtime stage below,
+# so the base image's version would otherwise ship in the final image. Fixed in 78.1.1.
+RUN pip install --no-cache-dir --upgrade pip setuptools \
     && pip install --no-cache-dir build \
     && pip install --no-cache-dir \
         fastapi \
