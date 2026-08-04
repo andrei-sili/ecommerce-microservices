@@ -1,5 +1,6 @@
 package com.ecommerce.order;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -22,7 +23,10 @@ import com.ecommerce.order.exception.InsufficientStockException;
 import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.support.AbstractIntegrationTest;
+import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.TestJwt;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
 import java.util.List;
@@ -49,6 +53,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   private static final String USER = TestJwt.bearer(TestJwt.token("7", List.of("USER")));
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
   @Autowired private OrderRepository orderRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
 
@@ -206,6 +211,55 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")));
+  }
+
+  // 8b. The 401 envelope carries EXACTLY the four contract keys. Order's ErrorResponse is a
+  // 5-component record whose productId is omitted only because of @JsonInclude(NON_NULL): if
+  // inclusion handling ever changes, "product_id": null appears here. Asserted as an exact key SET
+  // (never a subset) so that regression is a failure, not a silent widening.
+  @Test
+  void noToken_401_carriesExactlyTheFourContractKeys_withIso8601Timestamp() throws Exception {
+    MvcResult result =
+        mockMvc
+            .perform(get("/api/v1/orders"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
+            .andExpect(jsonPath("$.message", is("Authentication required")))
+            .andExpect(jsonPath("$.path", is("/api/v1/orders")))
+            .andReturn();
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    ContractShape.assertIso8601Utc(body, "timestamp");
+  }
+
+  // 11b. The 409 counterpart of the pin above: the SAME record renders FIVE keys when productId is
+  // present. The pair is the discriminating assertion — one of them breaks whichever way NON_NULL
+  // handling drifts.
+  @Test
+  void insufficientStock_409_carriesExactlyFiveKeys_includingProductId() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenThrow(new InsufficientStockException(42L, "Insufficient stock for Black T-Shirt"));
+
+    MvcResult result =
+        mockMvc
+            .perform(
+                post("/api/v1/orders")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-stock-keyset"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error", is("INSUFFICIENT_STOCK")))
+            .andExpect(jsonPath("$.message", is("Insufficient stock for Black T-Shirt")))
+            .andExpect(jsonPath("$.path", is("/api/v1/orders")))
+            .andReturn();
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path", "product_id");
+    assertThat(body.get("product_id").asLong()).isEqualTo(42L);
+    ContractShape.assertIso8601Utc(body, "timestamp");
   }
 
   // 9. Happy-path control: a mapped list route with a valid token returns 200 + pagination

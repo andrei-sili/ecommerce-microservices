@@ -2,11 +2,17 @@ package com.ecommerce.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.event.PaymentEventConsumer;
 import com.ecommerce.order.model.InboxEventId;
@@ -19,15 +25,18 @@ import com.ecommerce.order.support.AbstractIntegrationTest;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
@@ -43,6 +52,7 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   @Autowired private OrderRepository orderRepository;
   @Autowired private InboxEventRepository inboxEventRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   // Mocked so tests can control commit/release outcomes.
   @MockitoBean private ProductReservationClient reservationClient;
@@ -50,6 +60,8 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   @Mock private Channel channel;
 
   private AutoCloseable mocks;
+  private Logger consumerLogger;
+  private ListAppender<ILoggingEvent> consumerLog;
 
   @BeforeEach
   void setup() {
@@ -57,10 +69,16 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
     outboxEventRepository.deleteAll();
     orderRepository.deleteAll();
     inboxEventRepository.deleteAll();
+
+    consumerLogger = (Logger) LoggerFactory.getLogger(PaymentEventConsumer.class);
+    consumerLog = new ListAppender<>();
+    consumerLog.start();
+    consumerLogger.addAppender(consumerLog);
   }
 
   @AfterEach
   void tearDown() throws Exception {
+    consumerLogger.detachAppender(consumerLog);
     mocks.close();
   }
 
@@ -130,10 +148,49 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
     // Order is PAID.
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
         .isEqualTo(OrderStatus.PAID);
+    // Exactly ONE dedup row for the (paymentId, eventType) pair. Counted in SQL, not through the
+    // composite-key existsById the consumer itself uses: a broken key lookup would make production
+    // and an existsById-based assertion agree on the same wrong answer.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "select count(*) from inbox_events where dedup_key = ? and event_type = ?",
+                Integer.class,
+                paymentId,
+                "PaymentCompleted"))
+        .isEqualTo(1);
+    // ONE effect: the duplicate must not re-emit an event either.
+    assertThat(outboxEventRepository.count()).isZero();
     // Commit called exactly once (second delivery is a no-op ack).
     verify(reservationClient, times(1)).commit(orderId);
     // Both messages acked.
     verify(channel, times(2)).basicAck(1L, false);
+  }
+
+  /**
+   * A body that cannot be deserialized is a permanent failure: nack WITHOUT requeue, straight to
+   * the DLQ. Requeuing it instead would spin the queue forever on a message that can never succeed.
+   * The log line is asserted because the routing decision and the diagnosis must not drift apart —
+   * a deserialization failure reaching the transient branch would still nack, just with requeue.
+   */
+  @Test
+  void malformedPayload_deadLetteredImmediately_noRequeue() throws IOException {
+    MessageProperties props = new MessageProperties();
+    props.setDeliveryTag(9L);
+    props.setType("PaymentCompleted");
+    Message msg = new Message("{\"paymentId\":".getBytes(StandardCharsets.UTF_8), props);
+
+    consumer.handle(msg, channel);
+
+    verify(channel).basicNack(9L, false, false);
+    verify(channel, never()).basicNack(anyLong(), anyBoolean(), eq(true));
+    verify(channel, never()).basicAck(anyLong(), anyBoolean());
+    assertThat(inboxEventRepository.count()).isZero();
+    assertThat(orderRepository.count()).isZero();
+
+    assertThat(consumerLog.list)
+        .extracting(ILoggingEvent::getFormattedMessage)
+        .anySatisfy(line -> assertThat(line).startsWith("Failed to deserialize payment event"))
+        .noneSatisfy(line -> assertThat(line).contains("Transient failure, requeuing"));
   }
 
   @Test

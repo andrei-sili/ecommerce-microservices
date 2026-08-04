@@ -25,7 +25,10 @@ import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.service.OrderPersistenceService;
 import com.ecommerce.order.support.AbstractIntegrationTest;
+import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.TestJwt;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -46,6 +49,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
   @Autowired private OrderRepository orderRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
 
@@ -157,6 +161,96 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isCreated());
 
     assertThat(orderRepository.findAll()).hasSize(1);
+  }
+
+  // ---- Wire format pins ----
+
+  /**
+   * {@code created_at} / {@code updated_at} are ISO-8601 UTC Strings on every representation. The
+   * suite has plenty of assertions that these fields exist; none pinned their FORM, so a serializer
+   * default flipping to epoch numbers would stay green while every consumer breaks.
+   */
+  @Test
+  void orderDates_areIso8601UtcStrings_onCreateGetAndList() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenAnswer(inv -> reservation(inv.getArgument(0)));
+
+    String created =
+        mockMvc
+            .perform(
+                post("/api/v1/orders")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-dates"))
+            .andExpect(status().isCreated())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    JsonNode createdBody = objectMapper.readTree(created);
+    ContractShape.assertIso8601Utc(createdBody, "created_at");
+    ContractShape.assertIso8601Utc(createdBody, "updated_at");
+
+    String orderId = createdBody.get("id").asText();
+    JsonNode fetched =
+        objectMapper.readTree(
+            mockMvc
+                .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    ContractShape.assertIso8601Utc(fetched, "created_at");
+    ContractShape.assertIso8601Utc(fetched, "updated_at");
+
+    JsonNode listed =
+        objectMapper.readTree(
+            mockMvc
+                .perform(get("/api/v1/orders").header("Authorization", USER))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    ContractShape.assertIso8601Utc(listed.get("content").get(0), "created_at");
+    ContractShape.assertIso8601Utc(listed.get("content").get(0), "updated_at");
+  }
+
+  /**
+   * The OrderPlaced payload is the cross-service wire contract (Notification consumes it), and it
+   * is camelCase while every REST body is snake_case. Pins the EXACT key set at both levels: an
+   * extra or renamed key is a breaking change for a consumer this service cannot see.
+   */
+  @Test
+  void orderPlacedPayload_hasExactCamelCaseKeySet_andIso8601OccurredAt() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenAnswer(inv -> reservation(inv.getArgument(0)));
+
+    mockMvc
+        .perform(
+            post("/api/v1/orders")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-payload-shape"))
+        .andExpect(status().isCreated());
+
+    List<OutboxEvent> events = outboxEventRepository.findAll();
+    assertThat(events).hasSize(1);
+    String payload = events.get(0).getPayload();
+    JsonNode root = objectMapper.readTree(payload);
+
+    assertThat(ContractShape.keysOf(root))
+        .containsExactlyInAnyOrder("orderId", "userId", "items", "total", "currency", "occurredAt");
+    assertThat(root.get("items")).hasSize(1);
+    assertThat(ContractShape.keysOf(root.get("items").get(0)))
+        .containsExactlyInAnyOrder("productId", "quantity", "unitPrice");
+    ContractShape.assertIso8601Utc(root, "occurredAt");
+
+    // Serialized by a dedicated mapper, so the REST snake_case strategy must never leak in.
+    assertThat(payload)
+        .doesNotContain("\"order_id\"")
+        .doesNotContain("\"user_id\"")
+        .doesNotContain("\"product_id\"")
+        .doesNotContain("\"unit_price\"")
+        .doesNotContain("\"occurred_at\"");
   }
 
   // ---- Empty cart ----
