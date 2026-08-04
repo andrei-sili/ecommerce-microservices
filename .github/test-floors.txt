@@ -1,0 +1,19 @@
+# Per-service test floors for the Spring Boot 4.x migration wave.
+#
+# WHY: a migration that quietly deletes or disables tests looks identical to a clean one — the suite
+# still goes green, it just proves less. The zero-tests guard catches a suite that vanished entirely;
+# this file catches the far more likely case of a suite that SHRANK.
+#
+# Captured on Boot 3.5.16 at f7e549c5a094b3f7f6465cfb76f2dc04f07aeb74, from a real surefire run
+# (the anchored grep '^\s*@(Test|ParameterizedTest)\b' agrees on all five).
+#
+# RULE: the executed test count per service must be >= the floor. A DECREASE is a blocking finding
+# and requires a per-test written justification at the gate — never a silent floor edit. Raising a
+# floor after adding tests is expected and welcome.
+#
+# format: <service> <minimum executed tests>
+user 87
+product 89
+cart 75
+order 105
+payment 74

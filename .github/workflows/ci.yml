@@ -39,7 +39,7 @@ jobs:
       # Green-but-zero-tests is a FAILURE: a self-skipped suite (e.g. Testcontainers
       # silently skipping) must not pass as green. Count surefire + failsafe reports
       # and fail the job if the total is zero.
-      - name: Fail if no tests ran
+      - name: Fail if no tests ran, or if the suite shrank below its floor
         working-directory: services/${{ matrix.service }}
         run: |
           total=$(find . -path '*/target/*-reports/TEST-*.xml' -print0 \
@@ -47,6 +47,17 @@ jobs:
             | sed 's/[^0-9]//g' | awk '{s+=$1} END{print s+0}')
           echo "Total tests for ${{ matrix.service }}: $total"
           [ "$total" -gt 0 ] || { echo "::error::No tests ran for ${{ matrix.service }} — self-skip guard"; exit 1; }
+          # A migration can leave the suite green while it silently proves less, so the count must
+          # also stay at or above the floor captured on 3.5.16. See .github/test-floors.txt.
+          floor=$(awk -v s='${{ matrix.service }}' '$1==s {print $2}' "$GITHUB_WORKSPACE/.github/test-floors.txt")
+          if [ -z "$floor" ]; then
+            echo "::error::No floor defined for ${{ matrix.service }} in .github/test-floors.txt"; exit 1
+          fi
+          echo "Floor for ${{ matrix.service }}: $floor"
+          if [ "$total" -lt "$floor" ]; then
+            echo "::error::${{ matrix.service }} ran $total tests, below its floor of $floor. A shrinking suite is a blocking finding: justify per test at the gate, or restore the coverage. Do not edit the floor to make this pass."
+            exit 1
+          fi
 
   # Lint and test the notification service (Python/FastAPI). Runs unconditionally:
   # the service exists in the repo, so there is no folder gate.
