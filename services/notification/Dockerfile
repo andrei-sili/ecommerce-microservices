@@ -5,10 +5,7 @@ WORKDIR /build
 
 COPY pyproject.toml ./
 
-# setuptools is upgraded, not just pip: python:3.12-slim ships 70.3.0, which carries
-# CVE-2025-47273 (path traversal). site-packages is copied wholesale into the runtime stage below,
-# so the base image's version would otherwise ship in the final image. Fixed in 78.1.1.
-RUN pip install --no-cache-dir --upgrade pip setuptools \
+RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir build \
     && pip install --no-cache-dir \
         fastapi \
@@ -29,6 +26,15 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Upgrade setuptools HERE, in the runtime stage, not in the builder. python:3.12-slim ships 70.3.0
+# (CVE-2025-47273, path traversal), and this stage has its own copy: the COPY above overlays files
+# but leaves the base image's setuptools-70.3.0.dist-info directory in place, since the newer
+# release writes a differently-named dist-info. Trivy reads dist-info, so it kept reporting 70.3.0
+# even with a newer setuptools installed alongside. Letting pip do the upgrade in this stage removes
+# the old dist-info properly. Fixed in 78.1.1.
+RUN pip install --no-cache-dir --upgrade setuptools \
+    && rm -rf /root/.cache/pip
 
 # Copy application code
 COPY app/ ./app/
