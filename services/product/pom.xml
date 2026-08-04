@@ -137,10 +137,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <includes>
-            <include>**/*Test.java</include>
-            <include>**/*IT.java</include>
-          </includes>
+          <!-- MUTATION (AC-0.8 negative demo): includes removed so *IT stop running -->
         </configuration>
       </plugin>
 
