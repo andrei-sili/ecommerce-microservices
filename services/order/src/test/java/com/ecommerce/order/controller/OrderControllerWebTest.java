@@ -244,7 +244,14 @@ class OrderControllerWebTest {
                 .header("Authorization", USER)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"SHIPPED\"}"))
-        .andExpect(status().isBadRequest());
+        .andExpect(status().isBadRequest())
+        // An unknown enum is unreadable JSON, so this row renders through
+        // GlobalExceptionHandler.handleExceptionInternal -- the same path as the framework rows.
+        // It previously pinned neither media type nor body, so substituting the envelope for a
+        // ProblemDetail left it GREEN: a 400 is still a 400. A row that survives the whole
+        // envelope changing shape is not passing, it is absent. Media type measured at HEAD
+        // (`Content type expected:<measure/probe> but was:<application/json>`), not assumed.
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON));
     verifyNoInteractions(orderService);
   }
 }
