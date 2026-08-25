@@ -135,16 +135,16 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
   }
 
   private void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
-    MvcResult result =
-        actions
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-            .andExpect(jsonPath("$.message", is("Authentication required")))
-            .andExpect(jsonPath("$.path", is(PROFILE_PATH)))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andReturn();
+    MvcResult result = actions.andExpect(status().isUnauthorized()).andReturn();
 
+    // Content-Type before the body: a media-type drift must be reported as a media-type drift, not
+    // as "No value at JSON path" from a body matcher that ran first against an unreadable body.
     assertJsonNotProblem(result);
+    jsonPath("$.error", is("UNAUTHORIZED")).match(result);
+    jsonPath("$.message", is("Authentication required")).match(result);
+    jsonPath("$.path", is(PROFILE_PATH)).match(result);
+    jsonPath("$.timestamp", notNullValue()).match(result);
+
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     // timestamp must be a parseable ISO-8601 instant (throws otherwise).
     Instant.parse(body.get("timestamp").asText());
