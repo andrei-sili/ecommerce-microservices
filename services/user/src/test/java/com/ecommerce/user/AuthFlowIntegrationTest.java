@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
+import com.ecommerce.user.support.ErrorEnvelopes;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -291,7 +292,7 @@ class AuthFlowIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(loginBody(email, password)))
             .andExpect(status().isOk())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(ErrorEnvelopes.JSON))
             .andReturn();
     return objectMapper.readTree(result.getResponse().getContentAsString());
   }

@@ -121,6 +121,19 @@ class ProductReservationClientWireTest extends AbstractIntegrationTest {
             // The camelCase keys must NOT appear on the wire.
             .withRequestBody(notMatching("(?s).*\"orderId\".*"))
             .withRequestBody(notMatching("(?s).*\"productId\".*")));
+
+    // The transport itself is contract here (E7-4). The JDK client defaults to HTTP/2 and attempts
+    // an h2c upgrade on cleartext http://, which WireMock advertises — that combination fails a
+    // POST-with-body with a transport EOF, and order carries the fleet's only HTTP/1.1 pin because
+    // of it. Deleting the pin does turn this class red, but as a generic "service is unavailable":
+    // asserting the negotiated protocol names the cause instead of leaving it to be re-diagnosed.
+    assertThat(productService.getAllServeEvents())
+        .singleElement()
+        .satisfies(
+            event ->
+                assertThat(event.getRequest().getProtocol())
+                    .as("outbound reservation POST must negotiate HTTP/1.1, never h2c")
+                    .isEqualTo("HTTP/1.1"));
   }
 
   @Test

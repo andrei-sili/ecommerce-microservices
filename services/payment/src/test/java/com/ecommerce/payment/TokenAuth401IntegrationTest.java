@@ -80,7 +80,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
                         "Authorization",
                         TestJwt.bearer(TestJwt.expiredToken("7", List.of("USER")))))
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
             .andExpect(jsonPath("$.message").value("Authentication required"))
             .andExpect(jsonPath("$.path").value(PROBE_PATH))
@@ -103,7 +103,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get(PROBE_PATH).header("Authorization", authorizationHeader))
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
             .andExpect(jsonPath("$.message").value("Authentication required"))
             .andExpect(jsonPath("$.path").value(PROBE_PATH))
@@ -142,6 +142,29 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
         .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
 
     assertThat(paymentRepository.count()).isEqualTo(countBefore);
+  }
+
+  /**
+   * A9: {@code path} is echoed from {@code request.getRequestURI()}, which is attacker-controlled
+   * and carries the raw percent-encoded bytes rather than a decoded string. Boot 4.1 ships Tomcat
+   * 11 / Servlet 6.1, so a container that starts decoding (or re-encoding) the segment changes the
+   * envelope for every non-ASCII URL — a drift no ASCII path in this suite can expose.
+   */
+  @Test
+  void nonAsciiPathSegment_returns401_andEchoesTheUriPercentEncoded() throws Exception {
+    String body =
+        mockMvc
+            .perform(get("/api/v1/payments/caf\u00e9"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
+            .andExpect(jsonPath("$.message").value("Authentication required"))
+            .andExpect(jsonPath("$.path").value("/api/v1/payments/caf%C3%A9"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertParsableIso8601Timestamp(body);
   }
 
   private static void assertParsableIso8601Timestamp(String body) {

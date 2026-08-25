@@ -104,6 +104,10 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get(orderPath()).header("Authorization", "Bearer " + token))
         .andExpect(status().isOk())
+        // §4h(3): ahead of the body, like the 401 counterpart below. Every drift that swaps the
+        // representation also destroys $.id, so a body-first row would report a missing JSON path
+        // rather than the media type that actually changed.
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id", is(seededOrderId.toString())));
   }
 
@@ -153,7 +157,10 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            // EXACT, not contentTypeCompatibleWith: the compatible form ignores parameters, so a
+            // charset appearing or disappearing on the entry point's writer path (Tomcat 11 /
+            // Servlet 6.1) would slip through while every byte-comparison baseline goes red.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(orderPath())))

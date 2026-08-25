@@ -1,6 +1,7 @@
 package com.ecommerce.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -25,7 +27,10 @@ import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.service.OrderPersistenceService;
 import com.ecommerce.order.support.AbstractIntegrationTest;
+import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.TestJwt;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -34,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -46,6 +52,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
   @Autowired private OrderRepository orderRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
 
@@ -95,6 +102,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-happy"))
             .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.status").value("PENDING"))
             .andExpect(jsonPath("$.currency").value("EUR"))
             .andExpect(jsonPath("$.subtotal").value(39.98))
@@ -159,6 +167,101 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     assertThat(orderRepository.findAll()).hasSize(1);
   }
 
+  // ---- Wire format pins ----
+
+  /**
+   * {@code created_at} / {@code updated_at} are ISO-8601 UTC Strings on every representation. The
+   * suite has plenty of assertions that these fields exist; none pinned their FORM, so a serializer
+   * default flipping to epoch numbers would stay green while every consumer breaks.
+   */
+  @Test
+  void orderDates_areIso8601UtcStrings_onCreateGetAndList() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenAnswer(inv -> reservation(inv.getArgument(0)));
+
+    String created =
+        mockMvc
+            .perform(
+                post("/api/v1/orders")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-dates"))
+            .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    JsonNode createdBody = objectMapper.readTree(created);
+    ContractShape.assertIso8601Utc(createdBody, "created_at");
+    ContractShape.assertIso8601Utc(createdBody, "updated_at");
+
+    String orderId = createdBody.get("id").asText();
+    JsonNode fetched =
+        objectMapper.readTree(
+            mockMvc
+                .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    ContractShape.assertIso8601Utc(fetched, "created_at");
+    ContractShape.assertIso8601Utc(fetched, "updated_at");
+
+    JsonNode listed =
+        objectMapper.readTree(
+            mockMvc
+                .perform(get("/api/v1/orders").header("Authorization", USER))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andReturn()
+                .getResponse()
+                .getContentAsString());
+    ContractShape.assertIso8601Utc(listed.get("content").get(0), "created_at");
+    ContractShape.assertIso8601Utc(listed.get("content").get(0), "updated_at");
+  }
+
+  /**
+   * The OrderPlaced payload is the cross-service wire contract (Notification consumes it), and it
+   * is camelCase while every REST body is snake_case. Pins the EXACT key set at both levels: an
+   * extra or renamed key is a breaking change for a consumer this service cannot see.
+   */
+  @Test
+  void orderPlacedPayload_hasExactCamelCaseKeySet_andIso8601OccurredAt() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenAnswer(inv -> reservation(inv.getArgument(0)));
+
+    mockMvc
+        .perform(
+            post("/api/v1/orders")
+                .header("Authorization", USER)
+                .header("Idempotency-Key", "key-payload-shape"))
+        .andExpect(status().isCreated());
+
+    List<OutboxEvent> events = outboxEventRepository.findAll();
+    assertThat(events).hasSize(1);
+    String payload = events.get(0).getPayload();
+    JsonNode root = objectMapper.readTree(payload);
+
+    // FIRST: serialized by a dedicated mapper, so the REST snake_case strategy must never leak in.
+    // Ordered ahead of the key-set assertions deliberately — a casing drift also changes the key
+    // set, so behind them this scan could never be the assertion that fails (§4h).
+    assertThat(payload)
+        .doesNotContain("\"order_id\"")
+        .doesNotContain("\"user_id\"")
+        .doesNotContain("\"product_id\"")
+        .doesNotContain("\"unit_price\"")
+        .doesNotContain("\"occurred_at\"");
+
+    assertThat(ContractShape.keysOf(root))
+        .containsExactlyInAnyOrder("orderId", "userId", "items", "total", "currency", "occurredAt");
+    assertThat(root.get("items")).hasSize(1);
+    assertThat(ContractShape.keysOf(root.get("items").get(0)))
+        .containsExactlyInAnyOrder("productId", "quantity", "unitPrice");
+    ContractShape.assertIso8601Utc(root, "occurredAt");
+  }
+
   // ---- Empty cart ----
 
   @Test
@@ -172,6 +275,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .header("Idempotency-Key", "key-empty"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("EMPTY_CART"));
 
     assertThat(orderRepository.findAll()).isEmpty();
@@ -192,6 +296,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .header("Idempotency-Key", "key-stock"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("INSUFFICIENT_STOCK"))
         .andExpect(jsonPath("$.product_id").value(42));
 
@@ -214,6 +319,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-replay"))
             .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -226,6 +332,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-replay"))
             .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -246,6 +353,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", OTHER_USER))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("ORDER_NOT_FOUND"));
   }
 
@@ -256,6 +364,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value(orderId.toString()));
   }
 
@@ -266,6 +375,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", ADMIN))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value(orderId.toString()));
   }
 
@@ -277,6 +387,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_elements").value(2))
         .andExpect(jsonPath("$.content.length()").value(2))
         // Items are batch-loaded for the page; the list response keeps the full per-order shape.
@@ -287,6 +398,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", OTHER_USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_elements").value(0));
   }
 
@@ -302,9 +414,14 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders?page=0&size=2").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+        // D7: the pagination envelope is EXACTLY five top-level keys. Individual jsonPaths cannot
+        // see a sixth key appear, and the envelope is what every list client parses.
+        .andExpect(jsonPath("$.*", hasSize(5)))
         .andExpect(jsonPath("$.total_elements").value(3))
         .andExpect(jsonPath("$.total_pages").value(2))
         .andExpect(jsonPath("$.size").value(2))
+        .andExpect(jsonPath("$.page").value(0))
         .andExpect(jsonPath("$.content.length()").value(2))
         .andExpect(jsonPath("$.content[0].id").value(newest.toString()))
         .andExpect(jsonPath("$.content[0].items[0].product_id").value(42));
@@ -313,6 +430,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders?page=1&size=2").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.page").value(1))
         .andExpect(jsonPath("$.content.length()").value(1));
   }
@@ -330,6 +448,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
@@ -347,6 +466,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     // Retry of cancel on an already-CANCELLED order: 200 with the order, no second release.
@@ -357,6 +477,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
@@ -420,6 +541,10 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
             .perform(
                 post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", key))
             .andExpect(status().isCreated())
+            // The fixture reads $.id out of the body, so a representation drift on the 201 would
+            // surface as an opaque JsonPath failure inside a helper rather than naming the media
+            // type (§4h(3)). This path renders through the converter stack, not the advice.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();

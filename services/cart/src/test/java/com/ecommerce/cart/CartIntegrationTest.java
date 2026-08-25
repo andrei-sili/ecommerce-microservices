@@ -168,6 +168,13 @@ class CartIntegrationTest extends AbstractIntegrationTest {
         .andExpect(jsonPath("$.currency").doesNotExist());
   }
 
+  // The domain-error rows that follow render through GlobalExceptionHandler.handleApi
+  // (ApiException), not through handleExceptionInternal. The substitution probe used to attribute
+  // the framework rows — handleExceptionInternal rendering ProblemDetail.forStatus instead of the
+  // envelope — cannot reach handleApi, so it never exercised these rows. Their media type is
+  // therefore unverified in either direction: not shown guarded, not shown unguarded. Settling it
+  // needs a mutation on handleApi itself, with the same paired counterfactual (red on the mutated
+  // rendering, green on the shipped one).
   @Test
   void addingDifferentCurrency_returns422() throws Exception {
     mockMvc

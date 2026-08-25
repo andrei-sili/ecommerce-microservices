@@ -1,5 +1,6 @@
 package com.ecommerce.product;
 
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -116,10 +117,13 @@ class ProductCatalogIT extends AbstractIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.sku").value("TSHIRT-BLK-M"));
 
-    // Public paginated list with envelope.
+    // Public paginated list with envelope. The hasSize(5) guard pins the envelope to exactly
+    // content/page/size/total_elements/total_pages — the individual jsonPaths below cannot see a
+    // sixth key being added.
     mockMvc
         .perform(get("/api/v1/products?page=0&size=20"))
         .andExpect(status().isOk())
+        .andExpect(jsonPath("$.*", hasSize(5)))
         .andExpect(jsonPath("$.content").isArray())
         .andExpect(jsonPath("$.page").value(0))
         .andExpect(jsonPath("$.size").value(20))

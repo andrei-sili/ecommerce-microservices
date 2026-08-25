@@ -33,6 +33,12 @@ class Hs256OnlyValidationIntegrationTest extends AbstractDualAcceptTest {
     assertAudited("JWT accepted alg=HS256 kid=-");
   }
 
+  /** The allowlist here excludes RS256, so the flat rows' positive control must be HS256. */
+  @Override
+  protected String acceptedToken() {
+    return JwtTestKeys.mintHs256(CONTROL_USER_ID);
+  }
+
   @Test
   void validRs256_whenRs256NotAccepted_returns401() throws Exception {
     expectUnauthorizedEnvelope(

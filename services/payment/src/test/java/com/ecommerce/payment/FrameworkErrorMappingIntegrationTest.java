@@ -3,6 +3,7 @@ package com.ecommerce.payment;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,6 +34,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Full-context guard for framework/dispatcher error mapping in the (money-sensitive) Payment
@@ -70,22 +72,18 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   // 1. Unmapped sibling path with a valid token -> 404 RESOURCE_NOT_FOUND, full envelope, JSON.
   @Test
   void unmappedPath_returns404_withEnvelope_andJsonContentType_noLeak() throws Exception {
-    MvcResult result =
+    ResultActions actions =
         mockMvc
             .perform(get("/api/v1/payments-typo").header("Authorization", USER))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", is("Resource not found")))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.path", is("/api/v1/payments-typo")))
-            // error envelope is application/json, NOT application/problem+json.
-            .andExpect(header().string("Content-Type", containsString("application/json")))
-            .andReturn();
+            .andExpect(status().isNotFound());
 
-    String contentType = result.getResponse().getContentType();
-    assertFalse(
-        contentType != null && contentType.contains("problem"),
-        "framework error must not use application/problem+json, was: " + contentType);
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
+        .andExpect(jsonPath("$.message", is("Resource not found")))
+        .andExpect(jsonPath("$.timestamp", notNullValue()))
+        .andExpect(jsonPath("$.path", is("/api/v1/payments-typo")));
     assertNoLeak(result);
   }
 
@@ -95,15 +93,15 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unmappedSubPath_returns404_withEnvelope_andNoPathLeak() throws Exception {
     String path = "/api/v1/payments/" + UUID.randomUUID() + "/foo";
 
-    MvcResult result =
-        mockMvc
-            .perform(get(path).header("Authorization", USER))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", is("Resource not found")))
-            .andExpect(jsonPath("$.path", is(path)))
-            .andReturn();
+    ResultActions actions =
+        mockMvc.perform(get(path).header("Authorization", USER)).andExpect(status().isNotFound());
 
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
+        .andExpect(jsonPath("$.message", is("Resource not found")))
+        .andExpect(jsonPath("$.path", is(path)));
     assertNoLeak(result);
   }
 
@@ -112,15 +110,17 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void wrongMethod_returns405_withAllowHeader() throws Exception {
     String path = "/api/v1/payments/" + UUID.randomUUID();
 
-    MvcResult result =
+    ResultActions actions =
         mockMvc
             .perform(delete(path).header("Authorization", USER))
-            .andExpect(status().isMethodNotAllowed())
-            .andExpect(jsonPath("$.error", is("METHOD_NOT_ALLOWED")))
-            .andExpect(jsonPath("$.path", is(path)))
-            .andExpect(header().string("Allow", containsString("GET")))
-            .andReturn();
+            .andExpect(status().isMethodNotAllowed());
 
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("METHOD_NOT_ALLOWED")))
+        .andExpect(jsonPath("$.path", is(path)))
+        .andExpect(header().string("Allow", containsString("GET")));
     assertNoLeak(result);
   }
 
@@ -128,7 +128,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   // so the media-type error is the only fault).
   @Test
   void unsupportedMediaType_returns415_withAcceptHeader() throws Exception {
-    MvcResult result =
+    ResultActions actions =
         mockMvc
             .perform(
                 post("/api/v1/payments")
@@ -136,19 +136,21 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .header("Idempotency-Key", "key-415")
                     .contentType(MediaType.TEXT_PLAIN)
                     .content("just some plain text"))
-            .andExpect(status().isUnsupportedMediaType())
-            .andExpect(jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")))
-            .andExpect(jsonPath("$.path", is("/api/v1/payments")))
-            .andExpect(header().exists("Accept"))
-            .andReturn();
+            .andExpect(status().isUnsupportedMediaType());
 
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")))
+        .andExpect(jsonPath("$.path", is("/api/v1/payments")))
+        .andExpect(header().exists("Accept"));
     assertNoLeak(result);
   }
 
   // 5. Malformed JSON body (regression guard) -> 400 MALFORMED_REQUEST.
   @Test
   void malformedJson_returns400_malformedRequest() throws Exception {
-    MvcResult result =
+    ResultActions actions =
         mockMvc
             .perform(
                 post("/api/v1/payments")
@@ -156,11 +158,13 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .header("Idempotency-Key", "key-malformed")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{not json"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
-            .andExpect(jsonPath("$.path", is("/api/v1/payments")))
-            .andReturn();
+            .andExpect(status().isBadRequest());
 
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
+        .andExpect(jsonPath("$.path", is("/api/v1/payments")));
     assertNoLeak(result);
   }
 
@@ -168,7 +172,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   // Payment encodes violations into the envelope `message` (not a `fields` array).
   @Test
   void invalidBody_returns400_validationError_namingField() throws Exception {
-    MvcResult result =
+    ResultActions actions =
         mockMvc
             .perform(
                 post("/api/v1/payments")
@@ -176,11 +180,13 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .header("Idempotency-Key", "key-invalid")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"payment_method_token\":\"\"}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error", is("VALIDATION_ERROR")))
-            .andExpect(jsonPath("$.path", is("/api/v1/payments")))
-            .andReturn();
+            .andExpect(status().isBadRequest());
 
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
+        .andExpect(jsonPath("$.error", is("VALIDATION_ERROR")))
+        .andExpect(jsonPath("$.path", is("/api/v1/payments")));
     String body = result.getResponse().getContentAsString();
     assertTrue(
         body.contains("orderId") || body.contains("paymentMethodToken"),
@@ -191,11 +197,22 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   // 7. Security regression guard: no Authorization header -> 401 UNAUTHORIZED (entry point).
   @Test
   void noToken_returns401_unauthorized() throws Exception {
-    mockMvc
-        .perform(get("/api/v1/payments/" + UUID.randomUUID()))
-        .andExpect(status().isUnauthorized())
+    // Path A (entry point, hand-written writer). The Content-Type asserted here is MockMvc's
+    // NORMALISED value, not the wire value: MockMvc strips the encoding Tomcat appends, and A8 is
+    // per-path, not an identity -- on the wire this path carries charset=ISO-8859-1 while the
+    // converter-stack rows above carry none. See ContentTypeWireIntegrationTest and the corrected
+    // A8 / §4e for the measured per-path strings.
+    ResultActions actions =
+        mockMvc
+            .perform(get("/api/v1/payments/" + UUID.randomUUID()))
+            .andExpect(status().isUnauthorized());
+
+    MvcResult result = assertExactJsonContentType(actions);
+
+    actions
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", notNullValue()));
+    assertNoLeak(result);
   }
 
   // 8. Happy-path control: a real GET with the owner's token still returns 200 (funnel did not
@@ -204,9 +221,14 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void mappedRoute_withValidToken_returns200() throws Exception {
     String paymentId = createSucceededPayment("key-happy-get");
 
-    mockMvc
-        .perform(get("/api/v1/payments/" + paymentId).header("Authorization", USER))
-        .andExpect(status().isOk())
+    ResultActions actions =
+        mockMvc
+            .perform(get("/api/v1/payments/" + paymentId).header("Authorization", USER))
+            .andExpect(status().isOk());
+
+    assertExactJsonContentType(actions);
+
+    actions
         .andExpect(jsonPath("$.id", is(paymentId)))
         .andExpect(jsonPath("$.status", is("SUCCEEDED")));
   }
@@ -234,6 +256,30 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .getResponse()
             .getContentAsString();
     return com.jayway.jsonpath.JsonPath.read(response, "$.id");
+  }
+
+  /**
+   * The A7/A9 guard, replicated onto every framework row instead of living on one of eight.
+   *
+   * <p>Three separate things, all previously unpinned here: the {@code Content-Type} is the EXACT
+   * string captured on 3.5.16 ({@code contentTypeCompatibleWith} and {@code
+   * containsString("application/json")} both accept {@code application/problem+json} and both
+   * ignore a charset); and the body leaks no internals.
+   *
+   * <p>The equality IS A7's problem+json guard — nothing that equals {@code application/json} can
+   * be {@code application/problem+json} — so the separate {@code
+   * assertFalse(contentType.contains("problem"))} the contract describes is deliberately NOT used
+   * here. Under an equality it is dead weight, and on its own it is worse than dead: when the write
+   * actually fails, {@code getContentType()} comes back null and {@code contentType != null &&
+   * contains("problem")} evaluates false, so that form goes GREEN on the very drift it names.
+   */
+  private MvcResult assertExactJsonContentType(ResultActions actions) throws Exception {
+    MvcResult result = actions.andReturn();
+    assertEquals(
+        "application/json",
+        result.getResponse().getContentType(),
+        "framework error must render the exact captured JSON type, never problem+json");
+    return result;
   }
 
   /** No error body may leak the static-resource message, a stack trace or other internals. */

@@ -130,8 +130,11 @@
 
       <!--
         Run the Testcontainers integration tests (*IT) under `mvn test` alongside the unit tests,
-        so the reservation/catalog suites are part of the standard gate (they self-skip cleanly
-        when Docker is unavailable, see AbstractIntegrationTest).
+        so the reservation/catalog suites are part of the standard gate. They do NOT self-skip:
+        AbstractIntegrationTest starts the container in @BeforeAll and fails LOUDLY when Docker is
+        unavailable or incompatible, precisely so a misconfigured Docker cannot masquerade as a
+        green "Tests run: 0". Do not "restore" a self-skip here — there never was one, and adding
+        one would turn a red gate silent.
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

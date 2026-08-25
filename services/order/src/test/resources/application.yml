@@ -44,11 +44,21 @@ server:
 
 # Mirrors production exposure so the Prometheus scrape endpoint is exercised through the real
 # security chain in PrometheusMetricsIntegrationTest (the test application.yml fully shadows main).
+# The endpoint block mirrors the shipped one too: probes are auto-enabled only on Kubernetes, so
+# without it the readiness/liveness groups simply do not exist here and the permit matrix would be
+# asserting against a config production never runs.
 management:
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
 
 security:
   jwt:

@@ -159,11 +159,18 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
   }
 
+  /**
+   * The {@code Content-Type} is matched EXACTLY, not with {@code contentTypeCompatibleWith}, which
+   * ignores the charset parameter and also accepts {@code application/problem+json}. Exact equality
+   * is the stronger form of both guards: it fails on a charset appearing or disappearing (the
+   * Tomcat 11 / Servlet 6.1 risk on this {@code response.getWriter()} path) and on any migration to
+   * RFC-7807 problem details.
+   */
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(PRODUCT_PATH)))
@@ -179,7 +186,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     MvcResult result =
         postProduct(token)
             .andExpect(status().isForbidden())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("FORBIDDEN")))
             .andExpect(jsonPath("$.message", is("Insufficient permissions")))
             .andExpect(jsonPath("$.path", is(PRODUCT_PATH)))

@@ -21,6 +21,17 @@ class Hs256OnlyValidationIntegrationTest extends AbstractDualAcceptTest {
     registry.add("security.jwt.accepted-algs", () -> "HS256");
   }
 
+  /** RS256 is rejected in this context, so the observability control has to be the legacy alg. */
+  @Override
+  protected String acceptedToken(long userId) {
+    return JwtTestKeys.mintHs256(userId);
+  }
+
+  @Override
+  protected String expectedAuditLine() {
+    return "JWT accepted alg=HS256 kid=-";
+  }
+
   @Test
   void hs256_stillAccepted_countsAndAudits() throws Exception {
     long userId = registerUser("hs256only@example.com", "Hs256Only");
