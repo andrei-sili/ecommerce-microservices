@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -33,6 +32,15 @@ import org.springframework.test.web.servlet.MockMvc;
 class MetricsEndpointIntegrationTest extends AbstractIntegrationTest {
 
   private static final String PROMETHEUS_PATH = "/actuator/prometheus";
+
+  /**
+   * Exact scrape content type captured on 3.5.16, charset included (A9). {@code
+   * contentTypeCompatibleWith(TEXT_PLAIN)} ignores both the {@code version} parameter and the
+   * charset, so it cannot catch a Micrometer format change that would silently break every
+   * Prometheus scrape.
+   */
+  private static final String PROMETHEUS_TEXT = "text/plain;version=0.0.4;charset=utf-8";
+
   private static final String USER_BEARER = TestJwt.bearer(TestJwt.token("7", List.of("USER")));
 
   @Autowired private MockMvc mockMvc;
@@ -48,7 +56,7 @@ class MetricsEndpointIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get(PROMETHEUS_PATH))
             .andExpect(status().isOk())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+            .andExpect(content().contentType(PROMETHEUS_TEXT))
             .andReturn()
             .getResponse()
             .getContentAsString();

@@ -145,7 +145,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(path)))

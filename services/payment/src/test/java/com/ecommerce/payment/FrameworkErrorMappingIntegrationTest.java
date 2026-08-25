@@ -3,6 +3,7 @@ package com.ecommerce.payment;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -78,15 +80,9 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(jsonPath("$.message", is("Resource not found")))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andExpect(jsonPath("$.path", is("/api/v1/payments-typo")))
-            // error envelope is application/json, NOT application/problem+json.
-            .andExpect(header().string("Content-Type", containsString("application/json")))
             .andReturn();
 
-    String contentType = result.getResponse().getContentType();
-    assertFalse(
-        contentType != null && contentType.contains("problem"),
-        "framework error must not use application/problem+json, was: " + contentType);
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 2. Unmapped sub-path under a real item route -> 404 RESOURCE_NOT_FOUND (message must not echo
@@ -104,7 +100,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(jsonPath("$.path", is(path)))
             .andReturn();
 
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 3. Wrong HTTP method on the mapped item route -> 405 + Allow header listing GET.
@@ -121,7 +117,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(header().string("Allow", containsString("GET")))
             .andReturn();
 
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 4. Unsupported Content-Type on POST /payments -> 415 + Accept header (Idempotency-Key supplied
@@ -142,7 +138,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(header().exists("Accept"))
             .andReturn();
 
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 5. Malformed JSON body (regression guard) -> 400 MALFORMED_REQUEST.
@@ -161,7 +157,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(jsonPath("$.path", is("/api/v1/payments")))
             .andReturn();
 
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 6. Bean-Validation failure (regression guard) -> 400 VALIDATION_ERROR naming the field(s).
@@ -185,17 +181,23 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     assertTrue(
         body.contains("orderId") || body.contains("paymentMethodToken"),
         "validation envelope must name the offending field, was: " + body);
-    assertNoLeak(result);
+    assertJsonEnvelope(result);
   }
 
   // 7. Security regression guard: no Authorization header -> 401 UNAUTHORIZED (entry point).
   @Test
   void noToken_returns401_unauthorized() throws Exception {
-    mockMvc
-        .perform(get("/api/v1/payments/" + UUID.randomUUID()))
-        .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-        .andExpect(jsonPath("$.path", notNullValue()));
+    // Path A (entry point, hand-written writer) must render the SAME exact Content-Type as the
+    // converter-stack rows above -- that identity is invariant A8 and nothing pinned it before.
+    MvcResult result =
+        mockMvc
+            .perform(get("/api/v1/payments/" + UUID.randomUUID()))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
+            .andExpect(jsonPath("$.path", notNullValue()))
+            .andReturn();
+
+    assertJsonEnvelope(result);
   }
 
   // 8. Happy-path control: a real GET with the owner's token still returns 200 (funnel did not
@@ -208,7 +210,8 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/api/v1/payments/" + paymentId).header("Authorization", USER))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id", is(paymentId)))
-        .andExpect(jsonPath("$.status", is("SUCCEEDED")));
+        .andExpect(jsonPath("$.status", is("SUCCEEDED")))
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON));
   }
 
   /** Creates a SUCCEEDED payment owned by USER and returns its id. */
@@ -236,8 +239,26 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     return com.jayway.jsonpath.JsonPath.read(response, "$.id");
   }
 
-  /** No error body may leak the static-resource message, a stack trace or other internals. */
-  private void assertNoLeak(MvcResult result) throws Exception {
+  /**
+   * The A7/A9 guard, replicated onto every framework row instead of living on one of eight.
+   *
+   * <p>Three separate things, all previously unpinned here: the {@code Content-Type} is the EXACT
+   * string captured on 3.5.16 ({@code contentTypeCompatibleWith} and {@code
+   * containsString("application/json")} both accept {@code application/problem+json} and both
+   * ignore a charset); it is explicitly not problem+json, which is where Boot would move these
+   * bodies if {@code ResponseEntityExceptionHandler} started emitting {@code ProblemDetail}; and
+   * the body leaks no internals.
+   */
+  private void assertJsonEnvelope(MvcResult result) throws Exception {
+    String contentType = result.getResponse().getContentType();
+    assertEquals(
+        "application/json",
+        contentType,
+        "framework error must render the exact captured JSON type");
+    assertFalse(
+        contentType != null && contentType.contains("problem"),
+        "framework error must not use application/problem+json, was: " + contentType);
+
     String body = result.getResponse().getContentAsString();
     for (String forbidden :
         new String[] {
