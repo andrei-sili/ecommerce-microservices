@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -14,6 +15,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.cart.repository.CartRepository;
 import com.ecommerce.cart.support.AbstractIntegrationTest;
+import com.ecommerce.cart.support.JwtTestKeys;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
@@ -25,7 +27,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -42,6 +44,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
   protected static final String CART_PATH = "/api/v1/cart";
+
+  /**
+   * Captured on 3.5.16: the entry point sets {@code application/json} with no charset parameter.
+   */
+  private static final String UNAUTHORIZED_CONTENT_TYPE = "application/json";
+
+  /** Distinct from every suite's business subject, so the control never shares a cart row. */
+  protected static final long CONTROL_USER_ID = 4242L;
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
@@ -110,16 +120,56 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
         0.0001,
         "a rejected token must not increment jwt.accepted.tokens");
     assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
+
+    // F10 positive control, in the SAME method: "did not move" is free if the counter and the audit
+    // logger cannot move at all. The metrics-annotation swap, Micrometer 1.16->1.17 and the context
+    // forks these suites create are exactly the substrate the migration changes, so a run where
+    // neither direction moves must FAIL rather than read as a clean negative.
+    expectCartOk(acceptedToken(), CONTROL_USER_ID);
+
+    assertEquals(
+        acceptedBefore + 1,
+        totalAccepted(),
+        0.0001,
+        "an accepted token must increment jwt.accepted.tokens by exactly 1");
+    assertEquals(
+        auditBefore + 1,
+        auditLineCount(),
+        "an accepted token must emit exactly one jwt.audit line");
+  }
+
+  /**
+   * A token the suite's own accepted-algs configuration must accept. RS256 is the shipped posture;
+   * the HS256-rollback suite overrides this so its control is not itself a rejection.
+   */
+  protected String acceptedToken() {
+    return JwtTestKeys.mintRs256(CONTROL_USER_ID, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A);
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
+    expectUnauthorizedEnvelopeForPath(actions, CART_PATH);
+  }
+
+  /**
+   * The 401 envelope, with {@code path} asserted against the caller-supplied URI so the row can
+   * also be driven on a non-ASCII path.
+   *
+   * <p>The media type is pinned as the EXACT captured string (A9). {@code
+   * contentTypeCompatibleWith} ignores media-type parameters, so a charset appearing on the entry
+   * point's {@code response.getWriter()} path — Boot 4.1 ships Tomcat 11 / Servlet 6.1, which is a
+   * different container charset path than {@code getOutputStream()} — would satisfy it while
+   * changing the bytes every client sees.
+   */
+  protected void expectUnauthorizedEnvelopeForPath(ResultActions actions, String expectedPath)
+      throws Exception {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(UNAUTHORIZED_CONTENT_TYPE))
+            .andExpect(header().string(HttpHeaders.CONTENT_TYPE, UNAUTHORIZED_CONTENT_TYPE))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
-            .andExpect(jsonPath("$.path", is(CART_PATH)))
+            .andExpect(jsonPath("$.path", is(expectedPath)))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andReturn();
 

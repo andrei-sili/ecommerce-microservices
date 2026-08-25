@@ -1,5 +1,7 @@
 package com.ecommerce.cart;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+
 import com.ecommerce.cart.support.JwtTestKeys;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -60,5 +62,17 @@ class TokenAuth401IntegrationTest extends AbstractDualAcceptTest {
   @Test
   void malformedBearerToken_returns401_flat() throws Exception {
     expectUnauthorizedForHeader("Bearer not.a.jwt");
+  }
+
+  /**
+   * A9: {@code path} is echoed from {@code request.getRequestURI()}, which is attacker-controlled
+   * and carries the raw percent-encoded bytes rather than a decoded string. Boot 4.1 ships Tomcat
+   * 11 / Servlet 6.1, so a container that starts decoding (or re-encoding) the segment changes the
+   * envelope for every non-ASCII URL — a drift no ASCII path can expose.
+   */
+  @Test
+  void nonAsciiPathSegment_returns401_andEchoesTheUriPercentEncoded() throws Exception {
+    expectUnauthorizedEnvelopeForPath(
+        mockMvc.perform(get("/api/v1/cart/caf\u00e9")), "/api/v1/cart/caf%C3%A9");
   }
 }
