@@ -104,11 +104,15 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
   void cartWithItems_hasExactlyThePinnedSnakeCaseKeys_atEveryLevel() throws Exception {
     JsonNode body = seedThenReadCart();
 
+    // The recursive casing scan runs FIRST on purpose. Any casing drift also changes the key SET,
+    // so with the equality assertions ahead of it this scan could never be the one to fail — it
+    // would be unreachable, and an unreachable assertion proves nothing. Running it first also
+    // yields the better message: it names the offending keys instead of diffing two sets.
+    assertAllKeysSnakeCase(body);
     assertEquals(CART_KEYS, keysOf(body), "cart body key set drifted from the 3.5.16 capture");
     assertEquals(1, body.get("items").size());
     assertEquals(
         ITEM_KEYS, keysOf(body.get("items").get(0)), "cart item key set drifted from the capture");
-    assertAllKeysSnakeCase(body);
   }
 
   @Test
