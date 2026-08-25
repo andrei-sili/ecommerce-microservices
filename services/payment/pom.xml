@@ -19,6 +19,9 @@
 
   <properties>
     <java.version>21</java.version>
+    <!-- Override the Boot 3.5.16 BOM (42.7.11): CVE-2026-54291, HIGH — a SCRAM-SHA-256-PLUS
+         downgrade lets an attacker bypass channel-binding MITM protection. Fixed in 42.7.12. -->
+    <postgresql.version>42.7.12</postgresql.version>
     <jjwt.version>0.12.6</jjwt.version>
     <spotless.version>2.43.0</spotless.version>
   </properties>
