@@ -1,6 +1,7 @@
 package com.ecommerce.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -396,9 +397,13 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders?page=0&size=2").header("Authorization", USER))
         .andExpect(status().isOk())
+        // D7: the pagination envelope is EXACTLY five top-level keys. Individual jsonPaths cannot
+        // see a sixth key appear, and the envelope is what every list client parses.
+        .andExpect(jsonPath("$.*", hasSize(5)))
         .andExpect(jsonPath("$.total_elements").value(3))
         .andExpect(jsonPath("$.total_pages").value(2))
         .andExpect(jsonPath("$.size").value(2))
+        .andExpect(jsonPath("$.page").value(0))
         .andExpect(jsonPath("$.content.length()").value(2))
         .andExpect(jsonPath("$.content[0].id").value(newest.toString()))
         .andExpect(jsonPath("$.content[0].items[0].product_id").value(42));
