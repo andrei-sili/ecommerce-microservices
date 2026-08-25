@@ -167,6 +167,56 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   }
 
   /**
+   * The dedup key is COMPOSITE — {@code (dedup_key, event_type)} — and only a second event type on
+   * the same {@code paymentId} can prove the second column still discriminates. Every other dedup
+   * test replays one event type, so a lookup that silently collapses to {@code dedup_key} alone
+   * (which is what a regenerated composite-key query or an AOT-materialised repository can produce)
+   * keeps them all green while every follow-up event for that payment is swallowed as a duplicate.
+   *
+   * <p>PaymentFailed then PaymentCancelled for one payment is the real sequence behind this: a
+   * failed charge that is subsequently cancelled must record BOTH, not dedup the second away.
+   */
+  @Test
+  void secondEventTypeSamePaymentId_isNotDeduped_compositeKeyStillDiscriminates()
+      throws IOException {
+    UUID orderId = UUID.randomUUID();
+    String paymentId = "pay-shared-key";
+    pendingOrder(orderId, new BigDecimal("10.00"), "EUR");
+
+    consumer.handle(
+        paymentMessage(
+            "PaymentFailed", paymentId, orderId.toString(), new BigDecimal("10.00"), "EUR"),
+        channel);
+    consumer.handle(
+        paymentMessage(
+            "PaymentCancelled", paymentId, orderId.toString(), new BigDecimal("10.00"), "EUR"),
+        channel);
+
+    // TWO rows under one dedup_key: the second event was processed, not swallowed.
+    assertThat(
+            jdbcTemplate.queryForList(
+                "select event_type from inbox_events where dedup_key = ? order by event_type",
+                String.class,
+                paymentId))
+        .as("both event types must be recorded under the same paymentId")
+        .containsExactly("PaymentCancelled", "PaymentFailed");
+    // And each half of the key is individually addressable.
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentFailed")))
+        .isTrue();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCancelled")))
+        .isTrue();
+    // A key that ignored event_type would also answer true for a type that never arrived.
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCompleted")))
+        .as("a third, never-delivered event type must NOT be reported as already processed")
+        .isFalse();
+
+    // The first event owned the state transition; the second is a no-op on a terminal order.
+    assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
+        .isEqualTo(OrderStatus.PAYMENT_FAILED);
+    verify(channel, times(2)).basicAck(1L, false);
+  }
+
+  /**
    * A body that cannot be deserialized is a permanent failure: nack WITHOUT requeue, straight to
    * the DLQ. Requeuing it instead would spin the queue forever on a message that can never succeed.
    * The log line is asserted because the routing decision and the diagnosis must not drift apart —
