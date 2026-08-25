@@ -133,6 +133,30 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     assertThat(envelope.has("product_id")).isFalse();
   }
 
+  /**
+   * {@code path} is attacker-controlled: it is {@code request.getRequestURI()} echoed back into the
+   * body. A percent-encoded non-ASCII segment must round-trip byte-identically — neither decoded
+   * into raw UTF-8, nor double-encoded, nor mangled by a charset change on the writer path. Boot
+   * 4.1 ships Tomcat 11 / Servlet 6.1, where URI decoding and response encoding both moved.
+   */
+  @Test
+  void percentEncodedNonAsciiPath_roundTripsByteIdenticallyIntoTheEnvelope() throws Exception {
+    // The request carries the raw character; the container percent-encodes it, and getRequestURI()
+    // hands the ENCODED form to the envelope. Asserting the encoded spelling is what catches a
+    // decode/re-encode round trip that would echo raw UTF-8 (or mojibake) back to the caller.
+    String encodedPath = "/api/v1/caf%C3%A9";
+
+    MvcResult result =
+        mockMvc.perform(get("/api/v1/café")).andExpect(status().isNotFound()).andReturn();
+
+    JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
+    assertThat(envelope.get("error").textValue()).isEqualTo("RESOURCE_NOT_FOUND");
+    assertThat(envelope.get("path").textValue()).isEqualTo(encodedPath);
+    assertIso8601Utc(envelope, "timestamp");
+    assertJsonNotProblem(result);
+  }
+
   @Test
   void reservationForUnknownProduct_pins422ProductScopedEnvelopeToExactlyFiveKeys()
       throws Exception {

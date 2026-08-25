@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -52,6 +53,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/inventory"))
             .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
             .andExpect(jsonPath("$.message", is("Resource not found")))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
@@ -74,6 +76,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/products/42/reviews"))
             .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
             .andExpect(jsonPath("$.message", is("Resource not found")))
             .andExpect(jsonPath("$.path", is("/api/v1/products/42/reviews")))
@@ -89,6 +92,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(put("/api/v1/categories").header("Authorization", ADMIN))
             .andExpect(status().isMethodNotAllowed())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("METHOD_NOT_ALLOWED")))
             .andExpect(jsonPath("$.path", is("/api/v1/categories")))
             .andExpect(header().string("Allow", containsString("GET")))
@@ -109,6 +113,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.TEXT_PLAIN)
                     .content("just some plain text"))
             .andExpect(status().isUnsupportedMediaType())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")))
             .andExpect(jsonPath("$.path", is("/api/v1/categories")))
             .andExpect(header().exists("Accept"))
@@ -128,6 +133,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{not json"))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
             .andExpect(jsonPath("$.message", is("Request body or parameter is malformed")))
             .andExpect(jsonPath("$.path", is("/api/v1/categories")))
@@ -147,6 +153,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"name\":\"\",\"slug\":\"\"}"))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("VALIDATION_ERROR")))
             .andExpect(jsonPath("$.path", is("/api/v1/categories")))
             .andExpect(jsonPath("$.message", containsString("name")))
@@ -164,6 +171,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/products").param("page", "abc"))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
             .andExpect(jsonPath("$.path", is("/api/v1/products")))
             .andReturn();
@@ -180,6 +188,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"Apparel\",\"slug\":\"apparel\"}"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", is("/api/v1/categories")));
   }
@@ -194,6 +203,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"Apparel\",\"slug\":\"apparel\"}"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")));
   }
 
@@ -203,6 +213,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/categories"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$").isArray());
   }
 
@@ -223,6 +234,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("PRODUCT_NOT_FOUND")))
         .andExpect(jsonPath("$.product_id", is(999_999)));
   }
