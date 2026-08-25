@@ -26,9 +26,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -152,24 +150,26 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
    * The auth envelope is the NARROW one: exactly four keys. The exact key set is the assertion —
    * this used to also carry {@code doesNotContain("payment_id")}, which was <b>unfalsifiable</b>:
    * the 401 is rendered from {@code ErrorResponse}, a four-field POJO with no such property, so no
-   * change to the codebase could ever have made that line fail. It is replaced by the A8 identity
-   * below, which can.
+   * change to the codebase could ever have made that line fail.
    *
-   * <p>A8: this body is written by {@code RestAuthenticationEntryPoint} through {@code
-   * response.getWriter()} and a hand-held mapper (Path A), while the decline envelope goes through
-   * the converter stack (Path B). Boot moves those two independently, so their {@code Content-Type}
-   * strings being byte-equal is a real invariant with a real way to break.
+   * <p><b>The Content-Type assertion below is the MockMvc-normalised value, NOT the wire value.</b>
+   * This class previously asserted that the entry point (Path A, {@code response.getWriter()}) and
+   * the converter stack (Path B) render the same {@code Content-Type}. That was green here and
+   * FALSE in production: MockMvc normalises the encoding away, while a real Tomcat appends its
+   * default charset to Path A and nothing to Path B — {@code application/json;charset=ISO-8859-1}
+   * vs {@code application/json}. The real per-path strings are pinned, measured over a socket, in
+   * {@link ContentTypeWireIntegrationTest}. Do not re-add an identity assertion here.
    */
   @Test
-  void noToken_returns401_exactFourKeyEnvelope_pathAMatchesPathB() throws Exception {
-    MockHttpServletResponse pathA =
+  void noToken_returns401_exactFourKeyEnvelope() throws Exception {
+    String body =
         mockMvc
             .perform(get(UNKNOWN_PAYMENT_PATH))
             .andExpect(status().isUnauthorized())
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
-            .getResponse();
-    String body = pathA.getContentAsString();
+            .getResponse()
+            .getContentAsString();
 
     assertThat(JsonShape.keysOf(body))
         .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
@@ -177,17 +177,6 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
     assertThat(JsonPath.<String>read(body, "$.message")).isEqualTo("Authentication required");
     assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo(UNKNOWN_PAYMENT_PATH);
     JsonShape.assertIso8601Utc(body, "timestamp");
-
-    MockHttpServletResponse pathB =
-        mockMvc
-            .perform(get("/api/v1/payments-typo").header("Authorization", USER))
-            .andExpect(status().isNotFound())
-            .andReturn()
-            .getResponse();
-
-    assertThat(pathA.getHeader(HttpHeaders.CONTENT_TYPE))
-        .as("hand-written entry point and converter stack must render the same Content-Type")
-        .isEqualTo(pathB.getHeader(HttpHeaders.CONTENT_TYPE));
   }
 
   private String charge(
