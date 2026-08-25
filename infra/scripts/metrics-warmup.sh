@@ -197,8 +197,33 @@ for svc in $SERVICES; do
     fail "$svc: scrape has no '# HELP' — that is the no-op-registry signature, not a meter dump"
     continue
   fi
+  # The normalisation blanks label VALUES, so every service's hikari signature comes out
+  # byte-identical to every other's and a scrape that hit the WRONG container would be
+  # indistinguishable from the right one. Two identifying facts are therefore lifted from the RAW
+  # scrape and recorded in the header: the main application class (per-service, so it also GATES
+  # the capture) and the Hikari pool name.
+  # Pool names are NOT per-service and must not be used as the guard: only `user` sets
+  # `spring.datasource.hikari.pool-name` (user-hikari); the other four inherit HikariCP's default
+  # `HikariPool-1`. Recorded anyway, because a Boot 4 change to that default would show up here.
+  mainclass=$(grep -m1 -oE 'main_application_class="[^"]*"' "$WORK/$svc.raw" | cut -d'"' -f2)
+  pool=$(grep -m1 -oE 'pool="[^"]*"' "$WORK/$svc.raw" | cut -d'"' -f2)
+  [ -n "$mainclass" ] || mainclass=NONE
+  [ -n "$pool" ] || pool=NONE
+  ident="# service=$svc main_application_class=$mainclass hikari-pool=$pool"
+  # Independent evidence that the "200 on a DB-backed read" row really reached the database:
+  # `spring_data_repository_invocations_*` registers ONLY when a Spring Data repository is
+  # actually invoked. Asserting the 200 status alone would be satisfied by a cached or static
+  # response; this family cannot be.
+  if grep -q '^spring_data_repository_invocations_seconds_count' "$WORK/$svc.raw"; then
+    dbread="present (a repository was invoked)"
+  else
+    dbread="ABSENT"
+    fail "$svc: no spring_data_repository_invocations_* — the DB-backed read never reached a repository"
+  fi
   {
     printf '# captured-at %s :: %s\n' "$REV" "$INVOCATION"
+    printf '%s\n' "$ident"
+    printf '# db-read evidence: spring_data_repository_invocations_* %s\n' "$dbread"
     printf '# warm-up: %s\n' "${GOT[$svc]}"
     printf '# normalisation: grep -v %s | sed -E %s | sed -E %s | sort -u\n' \
       "'^#'" "'s/ [0-9.eE+-]+\$//'" "'s/=\"[^\"]*\"/=\"\"/g'"
@@ -209,8 +234,13 @@ for svc in $SERVICES; do
   # held invariant that was never measured (contract 6.13).
   {
     printf '# captured-at %s :: %s\n' "$REV" "$INVOCATION"
+    printf '%s\n' "$ident"
     signature "$WORK/$svc.raw" | grep '^hikaricp_'
   } > "$OUT/$svc-hikari.txt"
+  case "$mainclass" in
+    "com.ecommerce.$svc."*) : ;;
+    *) fail "$svc: scrape reports main_application_class='$mainclass' — the wrong container was scraped" ;;
+  esac
 
   local_n=$(grep -vc '^#' "$OUT/$svc-meters.txt")
   hik_n=$(grep -vc '^#' "$OUT/$svc-hikari.txt")
