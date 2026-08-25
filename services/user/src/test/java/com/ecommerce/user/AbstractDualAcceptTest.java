@@ -16,6 +16,7 @@ import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
+import com.ecommerce.user.support.JwtTestKeys;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
@@ -44,6 +45,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
   protected static final String PROFILE_PATH = "/api/v1/users/me";
   private static final String VALID_PASSWORD = "Sup3rSecret12";
+  private static final String CONTROL_EMAIL = "observability-control@example.com";
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
@@ -105,8 +107,18 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
    * observability flat — the {@code jwt.accepted.tokens} counter did not move and no {@code
    * jwt.audit} line was emitted. The phase-3 contraction gate is MEASURED from that output, so a
    * refactor that increments on rejection must turn this red, never green.
+   *
+   * <p>The two "did not move" assertions are worthless on their own: they are equally true of a
+   * build where the counter and the audit logger were deleted outright, or where the meter was
+   * renamed and {@code find("jwt.accepted.tokens")} now matches nothing — a signal that is always
+   * zero never moves. So each abuse row first drives a token this context DOES accept and requires
+   * the counter to move by exactly 1.0 and the audit log by exactly one line. The positive control
+   * lives in the same method deliberately: split across two tests, the negative half would keep
+   * passing on its own the day the positive half broke.
    */
   protected void expectUnauthorizedEnvelope(String token) throws Exception {
+    assertObservabilityCanMove();
+
     double acceptedBefore = totalAccepted();
     int auditBefore = auditLineCount();
 
@@ -119,6 +131,40 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
         0.0001,
         "a rejected token must not increment jwt.accepted.tokens");
     assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
+  }
+
+  /** Positive half of the control: an accepted token moves both signals by exactly one. */
+  private void assertObservabilityCanMove() throws Exception {
+    long controlUserId = registerUser(CONTROL_EMAIL, "Control");
+    double acceptedBefore = totalAccepted();
+    int auditBefore = auditLineCount();
+
+    expectProfileOk(acceptedToken(controlUserId), CONTROL_EMAIL);
+
+    assertEquals(
+        acceptedBefore + 1.0,
+        totalAccepted(),
+        0.0001,
+        "an accepted token must increment jwt.accepted.tokens — a signal stuck at zero cannot"
+            + " demonstrate anything about the rejection that follows");
+    assertEquals(
+        auditBefore + 1,
+        auditLineCount(),
+        "an accepted token must emit exactly one jwt.audit line");
+    assertAudited(expectedAuditLine());
+  }
+
+  /**
+   * A token this context's allowlist accepts. RS256 is the phase-3 posture and the default; {@link
+   * Hs256OnlyValidationIntegrationTest} pins the rollback direction and overrides it.
+   */
+  protected String acceptedToken(long userId) {
+    return JwtTestKeys.mintRs256(userId, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A);
+  }
+
+  /** The audit line {@link #acceptedToken} must produce — alg and kid are part of the contract. */
+  protected String expectedAuditLine() {
+    return "JWT accepted alg=RS256 kid=" + JwtTestKeys.KID_A;
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
