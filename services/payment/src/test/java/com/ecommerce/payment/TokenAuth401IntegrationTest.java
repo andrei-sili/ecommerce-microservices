@@ -80,7 +80,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
                         "Authorization",
                         TestJwt.bearer(TestJwt.expiredToken("7", List.of("USER")))))
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
             .andExpect(jsonPath("$.message").value("Authentication required"))
             .andExpect(jsonPath("$.path").value(PROBE_PATH))
@@ -103,7 +103,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get(PROBE_PATH).header("Authorization", authorizationHeader))
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error").value("UNAUTHORIZED"))
             .andExpect(jsonPath("$.message").value("Authentication required"))
             .andExpect(jsonPath("$.path").value(PROBE_PATH))

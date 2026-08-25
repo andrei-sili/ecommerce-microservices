@@ -110,7 +110,7 @@ class Rs256OnlyNoSecretValidationIntegrationTest {
             .perform(
                 get(path).header("Authorization", "Bearer " + JwtTestKeys.mintHs256(OWNER_SUBJECT)))
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(path)))

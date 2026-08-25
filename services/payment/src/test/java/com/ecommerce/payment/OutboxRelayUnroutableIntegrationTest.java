@@ -6,7 +6,7 @@ import com.ecommerce.payment.model.OutboxEvent;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.support.AbstractBrokerIntegrationTest;
-import java.nio.charset.StandardCharsets;
+import com.ecommerce.payment.support.WireEnvelope;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +41,9 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractBrokerIntegrationTest
   private static final String CONSUMER_QUEUE = "notification.payment-events";
   private static final String PAYMENT_ID = "b1e70000-1111-2222-3333-444455556666";
   private static final String ORDER_ID = "9f1c2e7a-1111-2222-3333-444455556666";
+
+  /** Fixed: AMQP timestamps carry second resolution, so Instant.now() cannot round-trip. */
+  private static final Instant OCCURRED_AT = Instant.parse("2026-06-26T10:00:00Z");
 
   @Autowired private OutboxRelay outboxRelay;
   @Autowired private OutboxEventRepository outboxEventRepository;
@@ -82,9 +85,7 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractBrokerIntegrationTest
     assertThat(delivered)
         .as("the event must be delivered to the consumer queue — zero loss")
         .isNotNull();
-    assertThat(delivered.getMessageProperties().getType()).isEqualTo("PaymentCompleted");
-    assertThat(delivered.getMessageProperties().getMessageId()).isEqualTo(String.valueOf(id));
-    assertThat(new String(delivered.getBody(), StandardCharsets.UTF_8)).contains(PAYMENT_ID);
+    WireEnvelope.assertMatches(delivered, outboxEventRepository.findById(id).orElseThrow());
   }
 
   private void bindConsumerQueue() {
@@ -100,6 +101,6 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractBrokerIntegrationTest
                 + "\"currency\":\"EUR\",\"status\":\"SUCCEEDED\","
                 + "\"occurredAt\":\"2026-06-26T10:00:00Z\"}")
             .formatted(PAYMENT_ID, ORDER_ID);
-    return new OutboxEvent("Payment", PAYMENT_ID, "PaymentCompleted", payload, Instant.now());
+    return new OutboxEvent("Payment", PAYMENT_ID, "PaymentCompleted", payload, OCCURRED_AT);
   }
 }
