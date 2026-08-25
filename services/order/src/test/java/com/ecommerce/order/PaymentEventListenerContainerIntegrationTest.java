@@ -4,8 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.config.RabbitMQConfig;
+import com.ecommerce.order.event.PaymentEventConsumer;
 import com.ecommerce.order.model.OrderEntity;
 import com.ecommerce.order.model.OrderStatus;
 import com.ecommerce.order.repository.InboxEventRepository;
@@ -19,9 +23,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
@@ -74,6 +80,9 @@ class PaymentEventListenerContainerIntegrationTest extends AbstractIntegrationTe
     registry.add("spring.rabbitmq.listener.simple.auto-startup", () -> "true");
   }
 
+  private Logger consumerLogger;
+  private ListAppender<ILoggingEvent> consumerLog;
+
   @BeforeEach
   void reset() {
     outboxEventRepository.deleteAll();
@@ -81,6 +90,16 @@ class PaymentEventListenerContainerIntegrationTest extends AbstractIntegrationTe
     inboxEventRepository.deleteAll();
     rabbitAdmin.purgeQueue(RabbitMQConfig.PAYMENT_QUEUE, false);
     rabbitAdmin.purgeQueue(RabbitMQConfig.PAYMENT_DLQ, false);
+
+    consumerLogger = (Logger) LoggerFactory.getLogger(PaymentEventConsumer.class);
+    consumerLog = new ListAppender<>();
+    consumerLog.start();
+    consumerLogger.addAppender(consumerLog);
+  }
+
+  @AfterEach
+  void detachLog() {
+    consumerLogger.detachAppender(consumerLog);
   }
 
   @Test
@@ -94,8 +113,17 @@ class PaymentEventListenerContainerIntegrationTest extends AbstractIntegrationTe
     assertThat(dead.getBody()).isEqualTo(body);
     assertThat(dead.getMessageProperties().getType()).isEqualTo("PaymentCompleted");
 
-    // x-death.count == 1 is the "no requeue" proof: a requeued message would be re-delivered and
-    // dead-lettered again, incrementing the counter.
+    // "No requeue" needs its own signal. x-death.count == 1 does NOT provide it: basic.nack with
+    // requeue=true does not dead-letter, so a message that was requeued once and only then
+    // dead-lettered still arrives here with count == 1. Proven by mutation — routing
+    // deserialization failures into the transient branch leaves every other assertion in this test
+    // green. The routing decision is only visible in which branch the consumer took.
+    assertThat(consumerLog.list)
+        .extracting(ILoggingEvent::getFormattedMessage)
+        .as("a malformed payload must go straight to the DLQ, never through the requeue branch")
+        .anySatisfy(line -> assertThat(line).startsWith("Failed to deserialize payment event"))
+        .noneSatisfy(line -> assertThat(line).contains("Transient failure, requeuing"));
+
     Object xDeath = dead.getMessageProperties().getHeaders().get("x-death");
     assertThat(xDeath).as("dead-lettered message must carry x-death").isInstanceOf(List.class);
     @SuppressWarnings("unchecked")

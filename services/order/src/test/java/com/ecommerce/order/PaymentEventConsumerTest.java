@@ -227,6 +227,11 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
     MessageProperties props = new MessageProperties();
     props.setDeliveryTag(9L);
     props.setType("PaymentCompleted");
+    // Explicitly first-delivery. Without this the flag is null, and a regression that routed
+    // deserialization failures into the transient branch would NPE on isRedelivered() instead of
+    // reaching basicNack(requeue=true) — the test would go red for the wrong reason and the
+    // "no requeue" assertions below would never execute.
+    props.setRedelivered(false);
     Message msg = new Message("{\"paymentId\":".getBytes(StandardCharsets.UTF_8), props);
 
     consumer.handle(msg, channel);
