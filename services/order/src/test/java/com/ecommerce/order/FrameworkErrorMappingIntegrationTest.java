@@ -3,7 +3,6 @@ package com.ecommerce.order;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -73,25 +72,32 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unmappedSubPath_returns404_withEnvelope_jsonContentType_noLeak() throws Exception {
     String path = "/api/v1/orders/" + UUID.randomUUID() + "/items";
 
+    // Status only in the chain: the content type is asserted BEFORE the body, because every way
+    // this row can drift also destroys the body, and a body assertion firing first would report
+    // "No value at JSON path" instead of naming the content type as the cause (§4h).
     MvcResult result =
         mockMvc
             .perform(get(path).header("Authorization", USER))
             .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", notNullValue()))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.path", is(path)))
             .andReturn();
 
-    // A7 FIRST (§4h): "application/problem+json" does not contain the substring
-    // "application/json", so the header assertion below trips on the same drift. Behind it this
-    // guard could never be the assertion that fails — it would read as coverage while proving
-    // nothing.
-    String contentType = result.getResponse().getContentType();
-    assertFalse(
-        contentType != null && contentType.contains("problem"),
-        "framework error must not use application/problem+json, was: " + contentType);
-    assertThat(result.getResponse().getHeader("Content-Type")).contains("application/json");
+    // A7, asserted as EXACT equality rather than as a "does not contain problem" guard. Measured
+    // on 3.5.16: the doesNotContain form cannot fail in either direction. Letting Spring's own
+    // ProblemDetail through swaps the body, so $.error fails first; forcing only the header to
+    // application/problem+json leaves no converter able to write ErrorResponse, so the response
+    // comes back with content type NULL and an empty body — and `contentType != null && contains
+    // ("problem")` is then FALSE, i.e. the guard PASSES on the very drift it exists to catch.
+    // Exact equality fires on both.
+    assertThat(result.getResponse().getContentType())
+        .as("framework errors are exactly application/json — never problem+json, never absent")
+        .isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+
+    assertThat(result.getResponse().getContentAsString()).isNotEmpty();
+    String body = result.getResponse().getContentAsString();
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("RESOURCE_NOT_FOUND");
+    assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo(path);
+    assertThat(JsonPath.<Object>read(body, "$.message")).isNotNull();
+    assertThat(JsonPath.<Object>read(body, "$.timestamp")).isNotNull();
     assertNoLeak(result);
   }
 
