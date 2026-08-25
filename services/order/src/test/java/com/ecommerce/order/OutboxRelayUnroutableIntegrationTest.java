@@ -9,13 +9,17 @@ import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.support.AbstractIntegrationTest;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
+import java.time.temporal.ChronoUnit;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageDeliveryMode;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
@@ -123,8 +127,7 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     assertThat(delivered)
         .as("the event must be delivered to the consumer queue — zero loss")
         .isNotNull();
-    assertThat(delivered.getMessageProperties().getType()).isEqualTo("OrderPlaced");
-    assertThat(new String(delivered.getBody())).contains(ORDER_ID);
+    assertWireEnvelope(delivered, afterSecondDrain);
   }
 
   /**
@@ -177,21 +180,48 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
         .isNull();
 
     // Both routable events are delivered (zero loss across the batch); exactly two, no duplicates.
-    List<String> deliveredBodies = new ArrayList<>();
+    // Delivery order across a batch is not contractual, so each message is matched back to its row
+    // by message_id and then asserted in full.
+    Map<String, Message> deliveredById = new HashMap<>();
     for (int i = 0; i < 2; i++) {
       Message msg = rabbitTemplate.receive(CONSUMER_QUEUE, 5000);
       assertThat(msg).as("expected a delivered message from the batch").isNotNull();
-      assertThat(msg.getMessageProperties().getType()).isEqualTo("OrderPlaced");
-      deliveredBodies.add(new String(msg.getBody(), StandardCharsets.UTF_8));
+      deliveredById.put(msg.getMessageProperties().getMessageId(), msg);
     }
-    String all = String.join("\n", deliveredBodies);
-    assertThat(all)
-        .as("both routable orders delivered, none lost")
-        .contains("11111111-aaaa-1111-aaaa-111111111111")
-        .contains("22222222-bbbb-2222-bbbb-222222222222");
+    assertThat(deliveredById.keySet())
+        .as("both routable rows delivered, none lost, none duplicated")
+        .containsExactlyInAnyOrder(String.valueOf(a.getId()), String.valueOf(b.getId()));
+    assertWireEnvelope(
+        deliveredById.get(String.valueOf(a.getId())),
+        outboxEventRepository.findById(a.getId()).orElseThrow());
+    assertWireEnvelope(
+        deliveredById.get(String.valueOf(b.getId())),
+        outboxEventRepository.findById(b.getId()).orElseThrow());
     assertThat(rabbitTemplate.receive(CONSUMER_QUEUE, 500))
         .as("no extra/duplicate delivery")
         .isNull();
+  }
+
+  /**
+   * The full wire envelope, not a substring of the body. {@code .contains(orderId)} passed through
+   * any key reorder, whitespace change or dropped field, and asserted nothing at all about the AMQP
+   * properties a consumer routes and deduplicates on.
+   */
+  private void assertWireEnvelope(Message delivered, OutboxEvent row) {
+    assertThat(new String(delivered.getBody(), StandardCharsets.UTF_8))
+        .as("the relay ships the payload column verbatim — it must not re-serialize it")
+        .isEqualTo(row.getPayload());
+
+    MessageProperties props = delivered.getMessageProperties();
+    assertThat(props.getType()).isEqualTo(row.getEventType());
+    assertThat(props.getContentType()).isEqualTo(MessageProperties.CONTENT_TYPE_JSON);
+    assertThat(props.getReceivedDeliveryMode()).isEqualTo(MessageDeliveryMode.PERSISTENT);
+    assertThat(props.getMessageId()).isEqualTo(String.valueOf(row.getId()));
+    // AMQP timestamps carry second precision, so the row's occurred_at is compared truncated.
+    assertThat(props.getTimestamp())
+        .isEqualTo(Date.from(row.getOccurredAt().truncatedTo(ChronoUnit.SECONDS)));
+    assertThat(props.getReceivedExchange()).isEqualTo(EXCHANGE);
+    assertThat(props.getReceivedRoutingKey()).isEqualTo(ROUTING_KEY);
   }
 
   private void bindConsumerQueue() {

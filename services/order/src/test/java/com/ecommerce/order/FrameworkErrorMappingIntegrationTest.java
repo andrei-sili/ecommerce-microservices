@@ -1,8 +1,8 @@
 package com.ecommerce.order;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
-import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -22,9 +23,13 @@ import com.ecommerce.order.exception.InsufficientStockException;
 import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.support.AbstractIntegrationTest;
+import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.TestJwt;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -49,6 +54,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   private static final String USER = TestJwt.bearer(TestJwt.token("7", List.of("USER")));
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
   @Autowired private OrderRepository orderRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
 
@@ -66,22 +72,32 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unmappedSubPath_returns404_withEnvelope_jsonContentType_noLeak() throws Exception {
     String path = "/api/v1/orders/" + UUID.randomUUID() + "/items";
 
+    // Status only in the chain: the content type is asserted BEFORE the body, because every way
+    // this row can drift also destroys the body, and a body assertion firing first would report
+    // "No value at JSON path" instead of naming the content type as the cause (§4h).
     MvcResult result =
         mockMvc
             .perform(get(path).header("Authorization", USER))
             .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", notNullValue()))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.path", is(path)))
-            // Error envelope is application/json, NOT application/problem+json.
-            .andExpect(header().string("Content-Type", containsString("application/json")))
             .andReturn();
 
-    String contentType = result.getResponse().getContentType();
-    assertFalse(
-        contentType != null && contentType.contains("problem"),
-        "framework error must not use application/problem+json, was: " + contentType);
+    // A7, asserted as EXACT equality rather than as a "does not contain problem" guard. Measured
+    // on 3.5.16: the doesNotContain form cannot fail in either direction. Letting Spring's own
+    // ProblemDetail through swaps the body, so $.error fails first; forcing only the header to
+    // application/problem+json leaves no converter able to write ErrorResponse, so the response
+    // comes back with content type NULL and an empty body — and `contentType != null && contains
+    // ("problem")` is then FALSE, i.e. the guard PASSES on the very drift it exists to catch.
+    // Exact equality fires on both.
+    assertThat(result.getResponse().getContentType())
+        .as("framework errors are exactly application/json — never problem+json, never absent")
+        .isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+
+    assertThat(result.getResponse().getContentAsString()).isNotEmpty();
+    String body = result.getResponse().getContentAsString();
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("RESOURCE_NOT_FOUND");
+    assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo(path);
+    assertThat(JsonPath.<Object>read(body, "$.message")).isNotNull();
+    assertThat(JsonPath.<Object>read(body, "$.timestamp")).isNotNull();
     assertNoLeak(result);
   }
 
@@ -206,6 +222,99 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")));
+  }
+
+  // 8b. The 401 envelope carries EXACTLY the four contract keys. Order's ErrorResponse is a
+  // 5-component record whose productId is omitted only because of @JsonInclude(NON_NULL): if
+  // inclusion handling ever changes, "product_id": null appears here. Asserted as an exact key SET
+  // (never a subset) so that regression is a failure, not a silent widening.
+  @Test
+  void noToken_401_carriesExactlyTheFourContractKeys_withIso8601Timestamp() throws Exception {
+    MvcResult result =
+        mockMvc
+            .perform(get("/api/v1/orders"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
+            .andExpect(jsonPath("$.message", is("Authentication required")))
+            .andExpect(jsonPath("$.path", is("/api/v1/orders")))
+            .andReturn();
+
+    // A7 BEFORE A9 (§4h): the exact-contentType pin below trips on any problem+json drift too, so
+    // ordered after it this guard could never be the assertion that fails. The auth rows bypass
+    // the @RestControllerAdvice entirely (entry point / denied handler), so they need their own.
+    String contentType = result.getResponse().getContentType();
+    assertFalse(
+        contentType != null && contentType.contains("problem"),
+        "401 must not use application/problem+json, was: " + contentType);
+    // A9: exact, so a charset appearing on the entry point's getWriter() path is caught.
+    assertThat(contentType).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    ContractShape.assertIso8601Utc(body, "timestamp");
+  }
+
+  /**
+   * {@code path} is echoed straight from {@code request.getRequestURI()}, which is attacker
+   * controlled and un-decoded. It must round-trip byte-identically: no decoding (which would let a
+   * {@code %2e%2e} segment read as {@code ..} downstream), no re-encoding, no charset mangling.
+   * Servlet 6.1 / Tomcat 11 change URI handling, so this is pinned rather than assumed.
+   */
+  @Test
+  void nonAsciiPercentEncodedPath_roundTripsByteIdentically_inTheEnvelope() throws Exception {
+    String rawPath = "/api/v1/orders/caf%C3%A9-%E2%82%AC";
+
+    MvcResult result =
+        mockMvc
+            .perform(get(URI.create(rawPath)).header("Authorization", USER))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
+            .andExpect(jsonPath("$.path", is(rawPath)))
+            .andReturn();
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    // The decode check leads (§4h): isEqualTo(rawPath) trips on a decode drift too, so ordered
+    // after it these would never be the assertion that names WHY the path changed.
+    assertThat(body.get("path").asText())
+        .as("the echoed path must not be percent-decoded before being echoed")
+        .doesNotContain("café")
+        .doesNotContain("€");
+    assertThat(body.get("path").asText())
+        .as("the echoed path must be the raw request URI, neither decoded nor re-encoded")
+        .isEqualTo(rawPath);
+    assertNoLeak(result);
+  }
+
+  // 11b. The 409 counterpart of the pin above: the SAME record renders FIVE keys when productId is
+  // present. The pair is the discriminating assertion — one of them breaks whichever way NON_NULL
+  // handling drifts.
+  @Test
+  void insufficientStock_409_carriesExactlyFiveKeys_includingProductId() throws Exception {
+    when(cartClient.getCart(any())).thenReturn(nonEmptyCart());
+    when(reservationClient.reserve(any(), any()))
+        .thenThrow(new InsufficientStockException(42L, "Insufficient stock for Black T-Shirt"));
+
+    MvcResult result =
+        mockMvc
+            .perform(
+                post("/api/v1/orders")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-stock-keyset"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.error", is("INSUFFICIENT_STOCK")))
+            .andExpect(jsonPath("$.message", is("Insufficient stock for Black T-Shirt")))
+            .andExpect(jsonPath("$.path", is("/api/v1/orders")))
+            .andReturn();
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path", "product_id");
+    assertThat(body.get("product_id").asLong()).isEqualTo(42L);
+    ContractShape.assertIso8601Utc(body, "timestamp");
   }
 
   // 9. Happy-path control: a mapped list route with a valid token returns 200 + pagination

@@ -2,13 +2,20 @@ package com.ecommerce.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.event.PaymentEventConsumer;
+import com.ecommerce.order.model.InboxEvent;
 import com.ecommerce.order.model.InboxEventId;
 import com.ecommerce.order.model.OrderEntity;
 import com.ecommerce.order.model.OrderStatus;
@@ -19,15 +26,19 @@ import com.ecommerce.order.support.AbstractIntegrationTest;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 /**
@@ -43,6 +54,7 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   @Autowired private OrderRepository orderRepository;
   @Autowired private InboxEventRepository inboxEventRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   // Mocked so tests can control commit/release outcomes.
   @MockitoBean private ProductReservationClient reservationClient;
@@ -50,6 +62,8 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
   @Mock private Channel channel;
 
   private AutoCloseable mocks;
+  private Logger consumerLogger;
+  private ListAppender<ILoggingEvent> consumerLog;
 
   @BeforeEach
   void setup() {
@@ -57,10 +71,16 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
     outboxEventRepository.deleteAll();
     orderRepository.deleteAll();
     inboxEventRepository.deleteAll();
+
+    consumerLogger = (Logger) LoggerFactory.getLogger(PaymentEventConsumer.class);
+    consumerLog = new ListAppender<>();
+    consumerLog.start();
+    consumerLogger.addAppender(consumerLog);
   }
 
   @AfterEach
   void tearDown() throws Exception {
+    consumerLogger.detachAppender(consumerLog);
     mocks.close();
   }
 
@@ -130,10 +150,122 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
     // Order is PAID.
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
         .isEqualTo(OrderStatus.PAID);
+    // Exactly ONE dedup row for the (paymentId, eventType) pair. Counted in SQL, not through the
+    // composite-key existsById the consumer itself uses: a broken key lookup would make production
+    // and an existsById-based assertion agree on the same wrong answer.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "select count(*) from inbox_events where dedup_key = ? and event_type = ?",
+                Integer.class,
+                paymentId,
+                "PaymentCompleted"))
+        .isEqualTo(1);
+    // ONE effect: the duplicate must not re-emit an event either.
+    assertThat(outboxEventRepository.count()).isZero();
     // Commit called exactly once (second delivery is a no-op ack).
     verify(reservationClient, times(1)).commit(orderId);
     // Both messages acked.
     verify(channel, times(2)).basicAck(1L, false);
+  }
+
+  /**
+   * The dedup key is COMPOSITE — {@code (dedup_key, event_type)} — and only a second event type on
+   * the same {@code paymentId} can prove the second column still discriminates. Every other dedup
+   * test replays one event type, so a lookup that silently collapses to {@code dedup_key} alone
+   * (which is what a regenerated composite-key query or an AOT-materialised repository can produce)
+   * keeps them all green while every follow-up event for that payment is swallowed as a duplicate.
+   *
+   * <p>PaymentFailed then PaymentCancelled for one payment is the real sequence behind this: a
+   * failed charge that is subsequently cancelled must record BOTH, not dedup the second away.
+   */
+  @Test
+  void secondEventTypeSamePaymentId_isNotDeduped_compositeKeyStillDiscriminates()
+      throws IOException {
+    UUID orderId = UUID.randomUUID();
+    String paymentId = "pay-shared-key";
+    pendingOrder(orderId, new BigDecimal("10.00"), "EUR");
+
+    consumer.handle(
+        paymentMessage(
+            "PaymentFailed", paymentId, orderId.toString(), new BigDecimal("10.00"), "EUR"),
+        channel);
+    consumer.handle(
+        paymentMessage(
+            "PaymentCancelled", paymentId, orderId.toString(), new BigDecimal("10.00"), "EUR"),
+        channel);
+
+    // TWO rows under one dedup_key: the second event was processed, not swallowed.
+    assertThat(
+            jdbcTemplate.queryForList(
+                "select event_type from inbox_events where dedup_key = ? order by event_type",
+                String.class,
+                paymentId))
+        .as("both event types must be recorded under the same paymentId")
+        .containsExactly("PaymentCancelled", "PaymentFailed");
+    // And each half of the key is individually addressable.
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentFailed")))
+        .isTrue();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCancelled")))
+        .isTrue();
+    // The first event owned the state transition; the second is a no-op on a terminal order.
+    assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
+        .isEqualTo(OrderStatus.PAYMENT_FAILED);
+    verify(channel, times(2)).basicAck(1L, false);
+  }
+
+  /**
+   * The negative half of the composite key, kept in its own test ON PURPOSE. Asserted inside the
+   * test above it would sit behind an assertion that the same mutation trips first, so it would
+   * never execute and would read as coverage without ever being evaluated (§6.7). Here nothing
+   * shields it: one row is seeded directly, and a key that ignores {@code event_type} reports a
+   * type that was never delivered as already processed.
+   */
+  @Test
+  void neverDeliveredEventType_isNotReportedAsProcessed() {
+    String paymentId = "pay-key-negative";
+    inboxEventRepository.save(new InboxEvent(paymentId, "PaymentFailed", Instant.now()));
+
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentFailed")))
+        .as("the delivered event type is processed")
+        .isTrue();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCompleted")))
+        .as("a never-delivered event type must NOT be reported as already processed")
+        .isFalse();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCancelled")))
+        .as("a never-delivered event type must NOT be reported as already processed")
+        .isFalse();
+  }
+
+  /**
+   * A body that cannot be deserialized is a permanent failure: nack WITHOUT requeue, straight to
+   * the DLQ. Requeuing it instead would spin the queue forever on a message that can never succeed.
+   * The log line is asserted because the routing decision and the diagnosis must not drift apart —
+   * a deserialization failure reaching the transient branch would still nack, just with requeue.
+   */
+  @Test
+  void malformedPayload_deadLetteredImmediately_noRequeue() throws IOException {
+    MessageProperties props = new MessageProperties();
+    props.setDeliveryTag(9L);
+    props.setType("PaymentCompleted");
+    // Explicitly first-delivery. Without this the flag is null, and a regression that routed
+    // deserialization failures into the transient branch would NPE on isRedelivered() instead of
+    // reaching basicNack(requeue=true) — the test would go red for the wrong reason and the
+    // "no requeue" assertions below would never execute.
+    props.setRedelivered(false);
+    Message msg = new Message("{\"paymentId\":".getBytes(StandardCharsets.UTF_8), props);
+
+    consumer.handle(msg, channel);
+
+    verify(channel).basicNack(9L, false, false);
+    verify(channel, never()).basicNack(anyLong(), anyBoolean(), eq(true));
+    verify(channel, never()).basicAck(anyLong(), anyBoolean());
+    assertThat(inboxEventRepository.count()).isZero();
+    assertThat(orderRepository.count()).isZero();
+
+    assertThat(consumerLog.list)
+        .extracting(ILoggingEvent::getFormattedMessage)
+        .anySatisfy(line -> assertThat(line).startsWith("Failed to deserialize payment event"))
+        .noneSatisfy(line -> assertThat(line).contains("Transient failure, requeuing"));
   }
 
   @Test
