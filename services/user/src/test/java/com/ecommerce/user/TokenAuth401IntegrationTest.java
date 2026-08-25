@@ -1,11 +1,11 @@
 package com.ecommerce.user;
 
+import static com.ecommerce.user.support.ErrorEnvelopes.assertJsonNotProblem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -138,13 +138,13 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(PROFILE_PATH)))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andReturn();
 
+    assertJsonNotProblem(result);
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     // timestamp must be a parseable ISO-8601 instant (throws otherwise).
     Instant.parse(body.get("timestamp").asText());
