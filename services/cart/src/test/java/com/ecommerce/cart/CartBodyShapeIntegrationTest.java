@@ -166,8 +166,11 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
   void emptyCart_omitsCurrencyEntirely_andKeepsTheOtherFiveKeys() throws Exception {
     JsonNode body = readCart();
 
-    assertEquals(EMPTY_CART_KEYS, keysOf(body), "empty cart must not gain a null currency key");
+    // The currency check runs FIRST, for the same reason as the casing scan above: a rendered
+    // `currency: null` also changes the key SET, so behind the equality this assertion could never
+    // be the one to fail. In front of it, the exact drift it exists for names itself.
     assertFalse(body.has("currency"), "currency must be OMITTED on an empty cart, never null");
+    assertEquals(EMPTY_CART_KEYS, keysOf(body), "empty cart must not gain a null currency key");
     assertTrue(body.get("items").isArray());
     assertEquals(0, body.get("items").size());
     assertTrue(body.get("subtotal").isIntegralNumber(), "an empty subtotal renders as 0");
