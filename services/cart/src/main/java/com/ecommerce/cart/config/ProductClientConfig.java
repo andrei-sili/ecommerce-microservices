@@ -27,7 +27,11 @@ public class ProductClientConfig {
         ClientHttpRequestFactorySettings.defaults()
             .withConnectTimeout(Duration.ofMillis(properties.connectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));
+    // clone() so this bean never mutates the shared builder — matching order's and payment's client
+    // configs. Prototype scope makes it harmless today; being the fleet's only non-cloning site is
+    // the cost, and it stops being harmless the moment that scope changes.
     return builder
+        .clone()
         .baseUrl(properties.baseUrl())
         .requestFactory(ClientHttpRequestFactoryBuilder.detect().build(settings))
         .build();
