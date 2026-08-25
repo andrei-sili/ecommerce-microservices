@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -20,7 +19,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
-import com.ecommerce.user.support.ErrorEnvelopes;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -31,6 +29,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.ResultMatcher;
 
 /**
  * Full-context guard for framework/dispatcher error mapping: unmapped path, wrong method, bad media
@@ -61,17 +61,14 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unmappedPath_returns404_withEnvelope_andJsonContentType_noLeak() throws Exception {
     String token = registerAndLogin("nadia@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(get("/api/v1/users").header("Authorization", "Bearer " + token))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", notNullValue()))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.path", is("/api/v1/users")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isNotFound()),
+        jsonPath("$.error", is("RESOURCE_NOT_FOUND")),
+        jsonPath("$.message", notNullValue()),
+        jsonPath("$.timestamp", notNullValue()),
+        jsonPath("$.path", is("/api/v1/users")));
   }
 
   // 2. Unmapped item path with a valid token -> 404 RESOURCE_NOT_FOUND (message must not echo
@@ -80,16 +77,13 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unmappedItemPath_returns404_withEnvelope_andNoPathLeak() throws Exception {
     String token = registerAndLogin("oscar@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(get("/api/v1/users/2").header("Authorization", "Bearer " + token))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", is("Resource not found")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/2")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isNotFound()),
+        jsonPath("$.error", is("RESOURCE_NOT_FOUND")),
+        jsonPath("$.message", is("Resource not found")),
+        jsonPath("$.path", is("/api/v1/users/2")));
   }
 
   // 3. Wrong HTTP method on a mapped route -> 405 + Allow header listing GET and PUT.
@@ -97,17 +91,14 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void wrongMethod_returns405_withAllowHeader() throws Exception {
     String token = registerAndLogin("paul@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(post("/api/v1/users/me").header("Authorization", "Bearer " + token))
-            .andExpect(status().isMethodNotAllowed())
-            .andExpect(jsonPath("$.error", is("METHOD_NOT_ALLOWED")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/me")))
-            .andExpect(header().string("Allow", containsString("GET")))
-            .andExpect(header().string("Allow", containsString("PUT")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isMethodNotAllowed()),
+        header().string("Allow", containsString("GET")),
+        header().string("Allow", containsString("PUT")),
+        jsonPath("$.error", is("METHOD_NOT_ALLOWED")),
+        jsonPath("$.path", is("/api/v1/users/me")));
   }
 
   // 4. Unsupported Content-Type on a body route -> 415 + Accept header present.
@@ -115,20 +106,17 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void unsupportedMediaType_returns415_withAcceptHeader() throws Exception {
     String token = registerAndLogin("quinn@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(
                 put("/api/v1/users/me")
                     .header("Authorization", "Bearer " + token)
                     .contentType(MediaType.TEXT_PLAIN)
                     .content("just some plain text"))
-            .andExpect(status().isUnsupportedMediaType())
-            .andExpect(jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/me")))
-            .andExpect(header().exists("Accept"))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isUnsupportedMediaType()),
+        header().exists("Accept"),
+        jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")),
+        jsonPath("$.path", is("/api/v1/users/me")));
   }
 
   // 5. Malformed JSON body (regression guard) -> 400 MALFORMED_REQUEST.
@@ -136,37 +124,34 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void malformedJson_returns400_malformedRequest() throws Exception {
     String token = registerAndLogin("rita@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(
                 put("/api/v1/users/me")
                     .header("Authorization", "Bearer " + token)
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{not json"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
-            .andExpect(jsonPath("$.message", is("Malformed request body")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/me")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isBadRequest()),
+        jsonPath("$.error", is("MALFORMED_REQUEST")),
+        jsonPath("$.message", is("Malformed request body")),
+        jsonPath("$.path", is("/api/v1/users/me")));
   }
 
   // 6. Bean-Validation failure (regression guard) -> 400 VALIDATION_ERROR with named fields.
   @Test
   void invalidBody_returns400_validationError_withFields() throws Exception {
     MvcResult result =
-        mockMvc
-            .perform(
-                post("/api/v1/auth/register")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(registerBody("", "short", "Sam")))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.error", is("VALIDATION_ERROR")))
-            .andExpect(jsonPath("$.path", is("/api/v1/auth/register")))
-            .andExpect(jsonPath("$.fields", notNullValue()))
-            .andExpect(jsonPath("$.fields.length()", greaterThan(0)))
-            .andReturn();
+        assertEnvelope(
+            mockMvc
+                .perform(
+                    post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(registerBody("", "short", "Sam")))
+                .andExpect(status().isBadRequest()),
+            jsonPath("$.error", is("VALIDATION_ERROR")),
+            jsonPath("$.path", is("/api/v1/auth/register")),
+            jsonPath("$.fields", notNullValue()),
+            jsonPath("$.fields.length()", greaterThan(0)));
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     boolean namesField = false;
@@ -177,21 +162,15 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
       }
     }
     assertTrue(namesField, "validation envelope must name the offending field (email/password)");
-    assertStandardEnvelope(result);
   }
 
   // 7. Security regression guard: no Authorization header -> 401 UNAUTHORIZED (entry point).
   @Test
   void noToken_returns401_unauthorized() throws Exception {
-    MvcResult result =
-        mockMvc
-            .perform(get("/api/v1/users"))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+    assertEnvelope(
+        mockMvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized()),
+        jsonPath("$.error", is("UNAUTHORIZED")),
+        jsonPath("$.path", is("/api/v1/users")));
   }
 
   // 8. Happy-path control: a mapped route with a valid token still returns 200.
@@ -199,11 +178,14 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void mappedRoute_withValidToken_returns200() throws Exception {
     String token = registerAndLogin("tina@example.com");
 
-    mockMvc
-        .perform(get("/api/v1/users/me").header("Authorization", "Bearer " + token))
-        .andExpect(status().isOk())
-        .andExpect(content().contentType(ErrorEnvelopes.JSON))
-        .andExpect(jsonPath("$.email", is("tina@example.com")));
+    MvcResult result =
+        mockMvc
+            .perform(get("/api/v1/users/me").header("Authorization", "Bearer " + token))
+            .andExpect(status().isOk())
+            .andReturn();
+
+    assertJsonNotProblem(result);
+    jsonPath("$.email", is("tina@example.com")).match(result);
   }
 
   /**
@@ -229,9 +211,9 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(status().isNotAcceptable())
             .andReturn();
 
+    assertNull(result.getResponse().getContentType(), "406 must carry no Content-Type");
     assertEquals(
         0, result.getResponse().getContentAsByteArray().length, "406 body must stay empty");
-    assertNull(result.getResponse().getContentType(), "406 must carry no Content-Type");
   }
 
   /**
@@ -244,16 +226,13 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   void percentEncodedNonAsciiPath_roundTripsByteIdentically_onPathB() throws Exception {
     String token = registerAndLogin("valerie@example.com");
 
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(
                 get(new URI("/api/v1/users/%C3%A9lise")).header("Authorization", "Bearer " + token))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/%C3%A9lise")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isNotFound()),
+        jsonPath("$.error", is("RESOURCE_NOT_FOUND")),
+        jsonPath("$.path", is("/api/v1/users/%C3%A9lise")));
   }
 
   /**
@@ -262,25 +241,35 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
    */
   @Test
   void percentEncodedNonAsciiPath_roundTripsByteIdentically_onPathA() throws Exception {
-    MvcResult result =
+    assertEnvelope(
         mockMvc
             .perform(get(new URI("/api/v1/users/%C3%A9lise/me")))
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-            .andExpect(jsonPath("$.path", is("/api/v1/users/%C3%A9lise/me")))
-            .andReturn();
-
-    assertStandardEnvelope(result);
+            .andExpect(status().isUnauthorized()),
+        jsonPath("$.error", is("UNAUTHORIZED")),
+        jsonPath("$.path", is("/api/v1/users/%C3%A9lise/me")));
   }
 
   /**
-   * The contract's two cross-cutting rules for an error body, applied to every row rather than to
-   * one: it is exactly {@code application/json} — never {@code application/problem+json}, which the
-   * suite's previous {@code contentTypeCompatibleWith} would have accepted — and it leaks nothing.
+   * Runs one error row in the order the contract requires: status (already applied by the caller),
+   * then the EXACT {@code Content-Type}, then the body.
+   *
+   * <p>The order is the point, not a style preference. A media-type drift must be attributed to the
+   * media type. With a body matcher running first, the same drift surfaces as {@code No value at
+   * JSON path "$.error"} — a real failure naming the wrong cause, which sends the reader hunting a
+   * missing field instead of a changed header. Keeping the body matchers as arguments rather than
+   * in the {@code andExpect} chain is what makes that order structural instead of a convention the
+   * next row can quietly break.
    */
-  private void assertStandardEnvelope(MvcResult result) throws Exception {
+  private MvcResult assertEnvelope(ResultActions actions, ResultMatcher... bodyMatchers)
+      throws Exception {
+    MvcResult result = actions.andReturn();
+
     assertJsonNotProblem(result);
+    for (ResultMatcher matcher : bodyMatchers) {
+      matcher.match(result);
+    }
     assertNoLeak(result);
+    return result;
   }
 
   /** No error body may leak the static-resource message, a stack trace or other internals. */

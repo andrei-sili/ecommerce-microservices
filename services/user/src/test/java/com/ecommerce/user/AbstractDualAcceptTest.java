@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,6 +45,16 @@ import org.springframework.test.web.servlet.ResultActions;
 abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
   protected static final String PROFILE_PATH = "/api/v1/users/me";
+
+  /**
+   * The 200 profile body travels the message-converter stack, not the hand-written entry point, so
+   * it is a separate measurement from the error rows even though it lands on the same string.
+   * Measured at 13042d9: {@code getContentType()} and the raw {@code Content-Type} header both
+   * {@code application/json}. Kept as its own constant rather than borrowed from the error envelope
+   * — the two are configured independently and can drift apart.
+   */
+  protected static final String PROFILE_200_CONTENT_TYPE = "application/json";
+
   private static final String VALID_PASSWORD = "Sup3rSecret12";
   private static final String CONTROL_EMAIL = "observability-control@example.com";
 
@@ -99,6 +110,10 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get(PROFILE_PATH).header("Authorization", "Bearer " + token))
         .andExpect(status().isOk())
+        // Media type before the body, for the same reason the error rows do it: a drift here would
+        // otherwise be reported as a missing $.email rather than as a changed Content-Type. This is
+        // also the row most likely to be copied when the next endpoint is added.
+        .andExpect(content().contentType(PROFILE_200_CONTENT_TYPE))
         .andExpect(jsonPath("$.email", is(expectedEmail)));
   }
 
@@ -168,16 +183,16 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
-    MvcResult result =
-        actions
-            .andExpect(status().isUnauthorized())
-            .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-            .andExpect(jsonPath("$.message", is("Authentication required")))
-            .andExpect(jsonPath("$.path", is(PROFILE_PATH)))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andReturn();
+    MvcResult result = actions.andExpect(status().isUnauthorized()).andReturn();
 
+    // Content-Type before the body: a media-type drift must be reported as a media-type drift, not
+    // as "No value at JSON path" from a body matcher that ran first against an unreadable body.
     assertJsonNotProblem(result);
+    jsonPath("$.error", is("UNAUTHORIZED")).match(result);
+    jsonPath("$.message", is("Authentication required")).match(result);
+    jsonPath("$.path", is(PROFILE_PATH)).match(result);
+    jsonPath("$.timestamp", notNullValue()).match(result);
+
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
     Set<String> keys = new HashSet<>();

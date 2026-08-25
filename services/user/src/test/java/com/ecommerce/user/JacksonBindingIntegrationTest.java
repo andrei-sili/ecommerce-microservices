@@ -49,8 +49,10 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
     assertEquals(
         JsonInclude.Include.NON_NULL,
         objectMapper.getSerializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
-        "spring.jackson.default-property-inclusion must still bind — it is what keeps the error"
-            + " envelope at four keys");
+        "spring.jackson.default-property-inclusion must still bind — it is the fleet-wide default"
+            + " that suppresses nulls in response bodies. It is NOT what holds the error envelope"
+            + " at four keys: ApiError carries its own @JsonInclude(NON_NULL) at type level (A3),"
+            + " so the envelope survives this property independently.");
   }
 
   @Test

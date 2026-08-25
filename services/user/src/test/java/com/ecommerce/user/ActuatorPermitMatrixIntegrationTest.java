@@ -145,7 +145,9 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/users/me"))
         .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
-        .andExpect(content().contentType("application/json"));
+        // Content-Type before the body, so a media-type drift is attributed to the media type
+        // rather than surfacing as "No value at JSON path" from the matcher that ran first.
+        .andExpect(content().contentType("application/json"))
+        .andExpect(jsonPath("$.error", is("UNAUTHORIZED")));
   }
 }
