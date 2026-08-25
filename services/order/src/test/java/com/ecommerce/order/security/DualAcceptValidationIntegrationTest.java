@@ -7,9 +7,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.JwtTestKeys;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,6 +20,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MvcResult;
 
 /**
  * Slice 5e phase-1 validation matrix under the {@code HS256,RS256} allowlist, through the real
@@ -215,17 +219,36 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
     double acceptedBefore = counterCount("RS256", JwtTestKeys.KID_A);
     int auditBefore = auditLineCount();
 
-    mockMvc
-        .perform(
-            get(orderPath())
-                .header(
-                    "Authorization",
-                    "Bearer "
-                        + JwtTestKeys.mintRs256(
-                            attackerId, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A)))
-        .andExpect(status().isNotFound())
-        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-        .andExpect(jsonPath("$.error", is("ORDER_NOT_FOUND")));
+    MvcResult result =
+        mockMvc
+            .perform(
+                get(orderPath())
+                    .header(
+                        "Authorization",
+                        "Bearer "
+                            + JwtTestKeys.mintRs256(
+                                attackerId, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A)))
+            .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.error", is("ORDER_NOT_FOUND")))
+            .andReturn();
+
+    // The 404 must not become an existence oracle. OrderNotFoundException's javadoc states that the
+    // message never reveals whether the order is missing or merely someone else's — but nothing
+    // enforced it: this row asserted only $.error, so a message naming the order or its owner, or
+    // an owner_id field appearing on the envelope, stayed green on the one path that matters.
+    // Two non-overlapping guards, neither dominating the other: an added field trips the key set,
+    // a talkative message trips the equality. $.path legitimately carries the id (it is the URL the
+    // caller already knows), so the guard is scoped to the message and the key set, not the body.
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertEquals(
+        Set.of("error", "message", "timestamp", "path"),
+        ContractShape.keysOf(body),
+        "the cross-user 404 envelope must not gain a field that identifies the real owner");
+    assertEquals(
+        "Order not found",
+        body.get("message").asText(),
+        "the 404 message must be identical for missing and not-yours — never an existence oracle");
 
     // A valid token that is authorization-denied is still an ACCEPTED token: the counter/audit
     // move (unlike the 401 abuse rows), which is exactly how a 404-authz differs from a 401-auth.
