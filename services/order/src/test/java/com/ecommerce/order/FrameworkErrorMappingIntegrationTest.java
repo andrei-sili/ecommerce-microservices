@@ -81,14 +81,17 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(jsonPath("$.message", notNullValue()))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andExpect(jsonPath("$.path", is(path)))
-            // Error envelope is application/json, NOT application/problem+json.
-            .andExpect(header().string("Content-Type", containsString("application/json")))
             .andReturn();
 
+    // A7 FIRST (§4h): "application/problem+json" does not contain the substring
+    // "application/json", so the header assertion below trips on the same drift. Behind it this
+    // guard could never be the assertion that fails — it would read as coverage while proving
+    // nothing.
     String contentType = result.getResponse().getContentType();
     assertFalse(
         contentType != null && contentType.contains("problem"),
         "framework error must not use application/problem+json, was: " + contentType);
+    assertThat(result.getResponse().getHeader("Content-Type")).contains("application/json");
     assertNoLeak(result);
   }
 
@@ -225,19 +228,20 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/orders"))
             .andExpect(status().isUnauthorized())
-            // A9: exact, so a charset appearing on the entry point's getWriter() path is caught.
-            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is("/api/v1/orders")))
             .andReturn();
 
-    // A7: the auth rows bypass the @RestControllerAdvice entirely (entry point / denied handler),
-    // so the problem+json guard has to be asserted here too, not only on the dispatcher rows.
+    // A7 BEFORE A9 (§4h): the exact-contentType pin below trips on any problem+json drift too, so
+    // ordered after it this guard could never be the assertion that fails. The auth rows bypass
+    // the @RestControllerAdvice entirely (entry point / denied handler), so they need their own.
     String contentType = result.getResponse().getContentType();
     assertFalse(
         contentType != null && contentType.contains("problem"),
         "401 must not use application/problem+json, was: " + contentType);
+    // A9: exact, so a charset appearing on the entry point's getWriter() path is caught.
+    assertThat(contentType).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     assertThat(ContractShape.keysOf(body))
@@ -267,11 +271,15 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     assertThat(ContractShape.keysOf(body))
         .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    // The decode check leads (§4h): isEqualTo(rawPath) trips on a decode drift too, so ordered
+    // after it these would never be the assertion that names WHY the path changed.
     assertThat(body.get("path").asText())
-        .as("the echoed path must be the raw request URI, neither decoded nor re-encoded")
-        .isEqualTo(rawPath)
+        .as("the echoed path must not be percent-decoded before being echoed")
         .doesNotContain("café")
         .doesNotContain("€");
+    assertThat(body.get("path").asText())
+        .as("the echoed path must be the raw request URI, neither decoded nor re-encoded")
+        .isEqualTo(rawPath);
     assertNoLeak(result);
   }
 

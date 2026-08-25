@@ -238,20 +238,22 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     String payload = events.get(0).getPayload();
     JsonNode root = objectMapper.readTree(payload);
 
-    assertThat(ContractShape.keysOf(root))
-        .containsExactlyInAnyOrder("orderId", "userId", "items", "total", "currency", "occurredAt");
-    assertThat(root.get("items")).hasSize(1);
-    assertThat(ContractShape.keysOf(root.get("items").get(0)))
-        .containsExactlyInAnyOrder("productId", "quantity", "unitPrice");
-    ContractShape.assertIso8601Utc(root, "occurredAt");
-
-    // Serialized by a dedicated mapper, so the REST snake_case strategy must never leak in.
+    // FIRST: serialized by a dedicated mapper, so the REST snake_case strategy must never leak in.
+    // Ordered ahead of the key-set assertions deliberately — a casing drift also changes the key
+    // set, so behind them this scan could never be the assertion that fails (§4h).
     assertThat(payload)
         .doesNotContain("\"order_id\"")
         .doesNotContain("\"user_id\"")
         .doesNotContain("\"product_id\"")
         .doesNotContain("\"unit_price\"")
         .doesNotContain("\"occurred_at\"");
+
+    assertThat(ContractShape.keysOf(root))
+        .containsExactlyInAnyOrder("orderId", "userId", "items", "total", "currency", "occurredAt");
+    assertThat(root.get("items")).hasSize(1);
+    assertThat(ContractShape.keysOf(root.get("items").get(0)))
+        .containsExactlyInAnyOrder("productId", "quantity", "unitPrice");
+    ContractShape.assertIso8601Utc(root, "occurredAt");
   }
 
   // ---- Empty cart ----

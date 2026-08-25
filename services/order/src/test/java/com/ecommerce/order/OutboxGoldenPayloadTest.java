@@ -108,17 +108,19 @@ class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
     recordFixedOrderPlaced();
     String payload = outboxEventRepository.findAll().get(0).getPayload();
 
+    // Ordered FIRST on purpose (§4h): a casing flip makes root.get("orderId") null and the reads
+    // below NPE, so behind them this scan could never be the assertion that reports the drift.
+    assertThat(payload)
+        .as("event payload must not be produced by the snake_case REST convention")
+        .doesNotContain(
+            "\"order_id\"", "\"user_id\"", "\"product_id\"", "\"unit_price\"", "\"occurred_at\"");
+
     JsonNode root = objectMapper.readTree(payload);
     assertThat(root.get("orderId").asText()).isEqualTo(ORDER_ID.toString());
     assertThat(root.get("userId").asLong()).isEqualTo(USER_ID);
     assertThat(root.get("occurredAt").asText()).isEqualTo("2026-06-26T10:00:00Z");
     assertThat(root.get("items").get(0).get("productId").asLong()).isEqualTo(42L);
     assertThat(root.get("items").get(0).get("unitPrice").asText()).isEqualTo("19.99");
-
-    assertThat(payload)
-        .as("event payload must not be produced by the snake_case REST convention")
-        .doesNotContain(
-            "\"order_id\"", "\"user_id\"", "\"product_id\"", "\"unit_price\"", "\"occurred_at\"");
 
     // The contrast that makes the line above falsifiable: the SAME record through the REST
     // ObjectMapper comes out snake_case. Two live, genuinely different conventions — so the
