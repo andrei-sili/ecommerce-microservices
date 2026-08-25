@@ -83,11 +83,15 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
     String body = getBody("/api/v1/products/" + id);
     JsonNode product = objectMapper.readTree(body);
 
+    // The whole-body camelCase scan runs BEFORE the key-set pins on purpose. A casing drift also
+    // breaks key-set equality, so behind them this scan could never be the assertion that fails —
+    // present as coverage, dead as a guard. First, it names the offending spelling; the key sets
+    // then still catch an ADDED or REMOVED key, which the scan cannot see.
+    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
     assertKeysExactly(product, PRODUCT_KEYS);
     assertKeysExactly(product.get("category"), "id", "name", "slug");
     assertIso8601Utc(product, "created_at");
     assertIso8601Utc(product, "updated_at");
-    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
   }
 
   // The wider envelopes in this fleet only stay wider because null-valued fields are omitted. A
@@ -100,6 +104,7 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
     String body = getBody("/api/v1/products/" + id);
     JsonNode product = objectMapper.readTree(body);
 
+    assertThat(body).doesNotContain("\"description\"");
     assertKeysExactly(
         product,
         "id",
@@ -112,7 +117,6 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
         "available",
         "created_at",
         "updated_at");
-    assertThat(body).doesNotContain("\"description\"");
   }
 
   @Test
@@ -123,6 +127,7 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
     String body = getBody("/api/v1/products?q=" + SEARCH_TOKEN + "&page=0&size=20");
     JsonNode page = objectMapper.readTree(body);
 
+    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
     assertKeysExactly(page, "content", "page", "size", "total_elements", "total_pages");
     assertThat(page.get("total_elements").intValue()).isEqualTo(2);
     assertThat(page.get("total_pages").intValue()).isEqualTo(1);
@@ -136,7 +141,6 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
       assertIso8601Utc(element, "created_at");
       assertIso8601Utc(element, "updated_at");
     }
-    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
   }
 
   @Test
@@ -148,15 +152,16 @@ class ResponseShapePinIT extends AbstractIntegrationTest {
 
     assertThat(categories.isArray()).isTrue();
     assertThat(categories.size()).isPositive();
+    // The entity carries created_at/updated_at; the response deliberately does not expose them.
+    // Both scans precede the key-set pin so each can be the assertion that fails.
+    assertThat(body).doesNotContain("created_at", "updated_at");
+    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
     List<String> slugs = new ArrayList<>();
     for (JsonNode category : categories) {
       assertKeysExactly(category, "id", "name", "slug");
       slugs.add(category.get("slug").textValue());
     }
     assertThat(slugs).contains(CATEGORY_SLUG);
-    // The entity carries created_at/updated_at; the response deliberately does not expose them.
-    assertThat(body).doesNotContain("created_at", "updated_at");
-    assertThat(body).doesNotContain(CAMEL_CASE_LEAKS);
   }
 
   private String getBody(String path) throws Exception {

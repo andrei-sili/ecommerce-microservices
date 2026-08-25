@@ -35,6 +35,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Pins the EXACT key set of both error envelopes product emits: the 4-key auth/plain envelope and
  * the 5-key product-scoped one used by the reservation endpoints.
  *
+ * <p>Assertion ORDER is load-bearing here: the narrow guard (no {@code product_id} / no camelCase
+ * spelling) precedes the exact key-set pin, because a drift that trips the narrow guard also breaks
+ * key-set equality. Behind the pin it could never be the assertion that fails.
+ *
  * <p>The two shapes coexist only because null fields are omitted. The regression to catch is the
  * plain envelope GAINING {@code product_id: null}, which every existing assertion (single jsonPaths
  * on {@code $.error}) passes straight through. Key sets are therefore asserted as sets, never as
@@ -87,12 +91,12 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(envelope.has("product_id")).isFalse();
     assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
     assertThat(envelope.get("error").textValue()).isEqualTo("UNAUTHORIZED");
     assertThat(envelope.get("message").textValue()).isEqualTo("Authentication required");
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/products");
     assertIso8601Utc(envelope, "timestamp");
-    assertThat(envelope.has("product_id")).isFalse();
   }
 
   @Test
@@ -109,11 +113,11 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(envelope.has("product_id")).isFalse();
     assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
     assertThat(envelope.get("error").textValue()).isEqualTo("FORBIDDEN");
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/products");
     assertIso8601Utc(envelope, "timestamp");
-    assertThat(envelope.has("product_id")).isFalse();
   }
 
   // A domain 404 shares the record with the auth envelope: same 4 keys, and no product_id even
@@ -128,11 +132,11 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(envelope.has("product_id")).isFalse();
     assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
     assertThat(envelope.get("error").textValue()).isEqualTo("PRODUCT_NOT_FOUND");
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/products/999999");
     assertIso8601Utc(envelope, "timestamp");
-    assertThat(envelope.has("product_id")).isFalse();
   }
 
   /**
@@ -183,13 +187,13 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(result.getResponse().getContentAsString()).doesNotContain("productId");
     assertKeysExactly(envelope, "error", "message", "timestamp", "path", "product_id");
     assertThat(envelope.get("error").textValue()).isEqualTo("PRODUCT_NOT_FOUND");
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/inventory/reservations");
     assertThat(envelope.get("product_id").isNumber()).isTrue();
     assertThat(envelope.get("product_id").longValue()).isEqualTo(999999L);
     assertIso8601Utc(envelope, "timestamp");
-    assertThat(result.getResponse().getContentAsString()).doesNotContain("productId");
   }
 
   @Test
