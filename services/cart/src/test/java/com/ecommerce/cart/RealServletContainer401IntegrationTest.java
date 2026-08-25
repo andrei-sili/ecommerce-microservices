@@ -39,9 +39,11 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * <p>Scope of what was demonstrated, so nobody over-reads this: both charset mutations tried on
  * 3.5.16 (an explicit {@code setCharacterEncoding("UTF-8")} in the entry point, and {@code
  * server.servlet.encoding.force-response} in the shipped yml) turn this row AND the MockMvc rows
- * red. No mutation was found that moves the container string while leaving the MockMvc string
- * fixed, so this row is not proven to catch anything the MockMvc rows miss — it is proven to pin
- * the production byte string, which nothing else in the fleet does.
+ * red — {@code CharacterEncodingFilter} applies in the mock servlet environment too. No mutation
+ * was found that moves the container string while leaving the MockMvc string fixed, so this row is
+ * NOT proven to catch anything the MockMvc rows miss. It is proven to pin the production byte
+ * string, which nothing else in the fleet does. Recorded as refuted in {@code api_contracts.md}
+ * §4e; the earlier "every in-suite assertion stays green" reading is wrong.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class RealServletContainer401IntegrationTest {
