@@ -1,12 +1,12 @@
 package com.ecommerce.user;
 
+import static com.ecommerce.user.support.ErrorEnvelopes.assertJsonNotProblem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -125,13 +125,13 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is(PROFILE_PATH)))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andReturn();
 
+    assertJsonNotProblem(result);
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
     Set<String> keys = new HashSet<>();
