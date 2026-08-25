@@ -6,7 +6,7 @@ import com.ecommerce.payment.model.OutboxEvent;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.support.AbstractBrokerIntegrationTest;
-import java.nio.charset.StandardCharsets;
+import com.ecommerce.payment.support.WireEnvelope;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +38,9 @@ class OutboxRelayMisCorrelationIntegrationTest extends AbstractBrokerIntegration
   private static final String COMPLETED_PAYMENT_ID = "aaaa1111-1111-1111-1111-111111111111";
   private static final String FAILED_PAYMENT_ID = "bbbb2222-2222-2222-2222-222222222222";
   private static final String ORDER_ID = "9f1c2e7a-1111-2222-3333-444455556666";
+
+  /** Fixed: AMQP timestamps carry second resolution, so Instant.now() cannot round-trip. */
+  private static final Instant OCCURRED_AT = Instant.parse("2026-06-26T10:00:00Z");
 
   @Autowired private OutboxRelay outboxRelay;
   @Autowired private OutboxEventRepository outboxEventRepository;
@@ -73,9 +76,8 @@ class OutboxRelayMisCorrelationIntegrationTest extends AbstractBrokerIntegration
     // Only the routable event reached a queue; the returned one is nowhere.
     Message delivered = rabbitTemplate.receive(COMPLETED_QUEUE, 5000);
     assertThat(delivered).as("routable event delivered").isNotNull();
-    assertThat(delivered.getMessageProperties().getType()).isEqualTo("PaymentCompleted");
-    assertThat(new String(delivered.getBody(), StandardCharsets.UTF_8))
-        .contains(COMPLETED_PAYMENT_ID);
+    WireEnvelope.assertMatches(
+        delivered, outboxEventRepository.findById(completed.getId()).orElseThrow());
     assertThat(rabbitTemplate.receive(COMPLETED_QUEUE, 500))
         .as("only the routable event is delivered to the bound queue")
         .isNull();
@@ -90,9 +92,8 @@ class OutboxRelayMisCorrelationIntegrationTest extends AbstractBrokerIntegration
         .isNotNull();
     Message failedDelivered = rabbitTemplate.receive(FAILED_QUEUE, 5000);
     assertThat(failedDelivered).as("retried event delivered — zero loss").isNotNull();
-    assertThat(failedDelivered.getMessageProperties().getType()).isEqualTo("PaymentFailed");
-    assertThat(new String(failedDelivered.getBody(), StandardCharsets.UTF_8))
-        .contains(FAILED_PAYMENT_ID);
+    WireEnvelope.assertMatches(
+        failedDelivered, outboxEventRepository.findById(failed.getId()).orElseThrow());
   }
 
   private void bindQueue(String queueName, String routingKey) {
@@ -108,7 +109,7 @@ class OutboxRelayMisCorrelationIntegrationTest extends AbstractBrokerIntegration
                 + "\"currency\":\"EUR\",\"status\":\"SUCCEEDED\","
                 + "\"occurredAt\":\"2026-06-26T10:00:00Z\"}")
             .formatted(paymentId, ORDER_ID);
-    return new OutboxEvent("Payment", paymentId, "PaymentCompleted", payload, Instant.now());
+    return new OutboxEvent("Payment", paymentId, "PaymentCompleted", payload, OCCURRED_AT);
   }
 
   private OutboxEvent paymentFailedRow(String paymentId) {
@@ -117,6 +118,6 @@ class OutboxRelayMisCorrelationIntegrationTest extends AbstractBrokerIntegration
                 + "\"currency\":\"EUR\",\"status\":\"FAILED\",\"failureReason\":\"CARD_DECLINED\","
                 + "\"occurredAt\":\"2026-06-26T10:00:00Z\"}")
             .formatted(paymentId, ORDER_ID);
-    return new OutboxEvent("Payment", paymentId, "PaymentFailed", payload, Instant.now());
+    return new OutboxEvent("Payment", paymentId, "PaymentFailed", payload, OCCURRED_AT);
   }
 }
