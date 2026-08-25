@@ -140,7 +140,13 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
         """
             .formatted(UUID.randomUUID());
 
-    for (String key : new String[] {null, suppliedKey}) {
+    // ORDER MATTERS — do not "tidy" this back to {null, suppliedKey}. With the null case first,
+    // a filter that echoes the key is caught by the message-equality assertion on iteration 1
+    // (message becomes "...: null"), and the no-echo guard below never gets to be the assertion
+    // that fails: there is no key to echo when none was sent. Supplying the key FIRST is what makes
+    // the guard live. Proven: with {null, suppliedKey} the echo mutation failed on the message
+    // assertion; with this order it fails on the guard.
+    for (String key : new String[] {suppliedKey, null}) {
       var request =
           post("/api/v1/inventory/reservations")
               .contentType(MediaType.APPLICATION_JSON)
