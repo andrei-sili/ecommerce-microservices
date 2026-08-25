@@ -120,6 +120,54 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     assertIso8601Utc(envelope, "timestamp");
   }
 
+  /**
+   * product's third path-A writer: {@code InternalApiKeyFilter} answers 401 ITSELF, bypassing the
+   * entry point and every {@code AbstractDualAcceptTest} helper, so nothing else in the suite pins
+   * its envelope. Existing coverage (ReservationIT) asserts status and {@code $.error} only, which
+   * a fifth key, a wrong path or an echoed key all survive.
+   *
+   * <p>The no-echo guard runs FIRST and is therefore live: no assertion above it dominates it, so a
+   * filter that leaked the supplied key into the body fails HERE by name rather than being masked
+   * by the key-set pin below.
+   */
+  @Test
+  void internalApiKeyFilter_pins401EnvelopeToExactlyFourKeys_andNeverEchoesTheKey()
+      throws Exception {
+    String suppliedKey = "wrong-key-9f3a";
+    String body =
+        """
+        { "order_id":"%s", "items":[{"product_id":1,"quantity":1}] }
+        """
+            .formatted(UUID.randomUUID());
+
+    for (String key : new String[] {null, suppliedKey}) {
+      var request =
+          post("/api/v1/inventory/reservations")
+              .contentType(MediaType.APPLICATION_JSON)
+              .content(body);
+      if (key != null) {
+        request = request.header("X-Internal-Api-Key", key);
+      }
+
+      MvcResult result =
+          mockMvc
+              .perform(request)
+              .andExpect(status().isUnauthorized())
+              .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+              .andReturn();
+
+      String rendered = result.getResponse().getContentAsString();
+      assertThat(rendered).doesNotContain(suppliedKey);
+
+      JsonNode envelope = objectMapper.readTree(rendered);
+      assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
+      assertThat(envelope.get("error").textValue()).isEqualTo("UNAUTHORIZED");
+      assertThat(envelope.get("message").textValue()).isEqualTo("Invalid internal API key");
+      assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/inventory/reservations");
+      assertIso8601Utc(envelope, "timestamp");
+    }
+  }
+
   // A domain 404 shares the record with the auth envelope: same 4 keys, and no product_id even
   // though the failure is about a product.
   @Test

@@ -112,8 +112,11 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
       seen.addAll(idsOf(getPage("/api/v1/products?page=" + pageNumber + "&size=2")));
     }
 
-    assertThat(seen).containsExactlyElementsOf(activeIds);
+    // Narrower guard first (§4h(2)): a leaked soft-deleted id also breaks exact-elements, so behind
+    // it this line could never be the assertion that fails. Ahead of it, it names the leak; the
+    // exact-elements pin still catches a dropped, duplicated or reordered ACTIVE id.
     assertThat(seen).doesNotContain(softDeletedId);
+    assertThat(seen).containsExactlyElementsOf(activeIds);
   }
 
   @Test
