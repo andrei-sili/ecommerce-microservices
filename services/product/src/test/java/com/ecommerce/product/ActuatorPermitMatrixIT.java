@@ -54,6 +54,11 @@ class ActuatorPermitMatrixIT extends AbstractIntegrationTest {
 
   // Liveness is the probe Kubernetes RESTARTS the pod on. It is asserted separately from readiness
   // because the two resolve through different health groups and can regress independently.
+  // Note (contract §4f): the AUTO-CONFIGURED liveness group forces show-details NEVER, so a global
+  // `show-details: always` leaves this body untouched — but a group DECLARED in the yml inherits
+  // the
+  // parent setting and does disclose components. This row is falsifiable through that second path;
+  // §4f does not mean liveness can never move.
   @Test
   void healthLiveness_isPermittedWithoutToken_andDisclosesOnlyStatus() throws Exception {
     mockMvc

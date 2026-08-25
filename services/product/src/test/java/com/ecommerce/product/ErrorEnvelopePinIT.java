@@ -5,6 +5,7 @@ import static com.ecommerce.product.support.JsonShape.assertKeysExactly;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecommerce.product.model.Category;
@@ -82,6 +83,7 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(validProductBody()))
             .andExpect(status().isUnauthorized())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -91,7 +93,6 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/products");
     assertIso8601Utc(envelope, "timestamp");
     assertThat(envelope.has("product_id")).isFalse();
-    assertJsonNotProblem(result);
   }
 
   @Test
@@ -104,6 +105,7 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(validProductBody()))
             .andExpect(status().isForbidden())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -112,7 +114,6 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     assertThat(envelope.get("path").textValue()).isEqualTo("/api/v1/products");
     assertIso8601Utc(envelope, "timestamp");
     assertThat(envelope.has("product_id")).isFalse();
-    assertJsonNotProblem(result);
   }
 
   // A domain 404 shares the record with the auth envelope: same 4 keys, and no product_id even
@@ -123,6 +124,7 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/products/999999"))
             .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -147,14 +149,17 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     String encodedPath = "/api/v1/caf%C3%A9";
 
     MvcResult result =
-        mockMvc.perform(get("/api/v1/café")).andExpect(status().isNotFound()).andReturn();
+        mockMvc
+            .perform(get("/api/v1/café"))
+            .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
     assertKeysExactly(envelope, PLAIN_ENVELOPE_KEYS);
     assertThat(envelope.get("error").textValue()).isEqualTo("RESOURCE_NOT_FOUND");
     assertThat(envelope.get("path").textValue()).isEqualTo(encodedPath);
     assertIso8601Utc(envelope, "timestamp");
-    assertJsonNotProblem(result);
   }
 
   @Test
@@ -174,6 +179,7 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
             .andExpect(status().isUnprocessableEntity())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -204,6 +210,7 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
             .andExpect(status().isConflict())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn();
 
     JsonNode envelope = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -212,13 +219,6 @@ class ErrorEnvelopePinIT extends AbstractIntegrationTest {
     assertThat(envelope.get("product_id").longValue()).isEqualTo(productId);
     assertIso8601Utc(envelope, "timestamp");
     assertThat(reservationRepository.findByOrderId(orderId)).isEmpty();
-  }
-
-  private void assertJsonNotProblem(MvcResult result) {
-    String contentType = result.getResponse().getContentType();
-    assertThat(contentType).isNotNull();
-    assertThat(contentType).contains("application/json");
-    assertThat(contentType).doesNotContain("problem");
   }
 
   private String validProductBody() {
