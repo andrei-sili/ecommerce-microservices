@@ -1,15 +1,15 @@
 package com.ecommerce.payment;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecommerce.payment.support.AbstractBrokerIntegrationTest;
-import com.ecommerce.payment.support.JsonShape;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -35,30 +35,47 @@ import org.springframework.test.web.servlet.MockMvc;
     })
 class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest {
 
+  /**
+   * Actuator's own vendor type, captured on 3.5.16. Asserted exactly (A9): {@code
+   * contentTypeCompatibleWith} treats a charset change as equal and cannot catch the drift.
+   */
+  private static final MediaType ACTUATOR_JSON =
+      MediaType.parseMediaType("application/vnd.spring-boot.actuator.v3+json");
+
   @Autowired private MockMvc mockMvc;
 
+  /**
+   * The EXACT body, not {@code $.status}. A subset assertion passes just as happily on a body that
+   * has GAINED {@code components}/{@code details} — which is what {@code show-details} drifting to
+   * {@code always} produces, and it discloses DB hostnames and connection state to anything on the
+   * pod network (F4). {@code groups} is present here because probes are enabled in production, so
+   * it is part of the pin, not noise.
+   */
   @Test
-  void health_tokenless_returns200_up() throws Exception {
+  void health_tokenless_returns200_exactBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("UP"));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
   }
 
   @Test
-  void healthReadiness_tokenless_returns200_up() throws Exception {
+  void healthReadiness_tokenless_returns200_exactBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health/readiness"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("UP"));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\"}"));
   }
 
   @Test
-  void healthLiveness_tokenless_returns200_up() throws Exception {
+  void healthLiveness_tokenless_returns200_exactBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health/liveness"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status").value("UP"));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\"}"));
   }
 
   /**
@@ -68,15 +85,11 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest 
    */
   @Test
   void info_tokenless_returns200_emptyBody() throws Exception {
-    String body =
-        mockMvc
-            .perform(get("/actuator/info"))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
-
-    assertThat(JsonShape.keysOf(body)).isEmpty();
+    mockMvc
+        .perform(get("/actuator/info"))
+        .andExpect(status().isOk())
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{}"));
   }
 
   /** Control: the permits are scoped, not a blanket "everything is open" on this context. */
@@ -85,6 +98,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest 
     mockMvc
         .perform(get("/api/v1/payments/{id}", UUID.randomUUID()))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
   }
 }
