@@ -22,7 +22,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Golden-fixture pin for the {@code OrderPlaced} wire payload (contract AC-0.5 / B6).
@@ -37,6 +37,20 @@ import org.springframework.transaction.annotation.Transactional;
  * (see {@code rules/events.md}). That mapper is production code and is not shadowed by the test
  * {@code application.yml}, so this fixture stays falsifiable on a service where the yml shadow
  * blinds the REST-side casing pins.
+ *
+ * <p><b>The fixture holds the WIRE bytes, not Jackson's output</b> (contract §4b). {@code
+ * outbox_events.payload} is {@code JSONB}, so Postgres rewrites the text on insert — keys reordered
+ * by length-then-bytes, a space after every {@code :} and {@code ,} — and the relay ships that
+ * column verbatim ({@code OutboxRelay#buildAmqpMessage}). Consequences, both deliberate:
+ *
+ * <ul>
+ *   <li>The read MUST cross the database. Reading the entity inside the writing transaction returns
+ *       the pre-insert Jackson string from the persistence context and asserts bytes that never
+ *       reach a consumer — which is why this class is not {@code @Transactional}.
+ *   <li>Key ORDER is Postgres's, not Jackson's, so this fixture does not pin Jackson key order (an
+ *       empty diff here is not evidence that key order held). Casing, presence, number format and
+ *       date format all survive the rewrite and ARE pinned.
+ * </ul>
  */
 class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
 
@@ -50,6 +64,7 @@ class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
   @Autowired private OrderRepository orderRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void cleanDb() {
@@ -58,7 +73,6 @@ class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
   }
 
   @Test
-  @Transactional
   void orderPlacedPayload_matchesGoldenFixtureByteForByte() throws Exception {
     recordFixedOrderPlaced();
 
@@ -68,11 +82,17 @@ class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
     assertThat(row.getAggregateId()).isEqualTo(ORDER_ID.toString());
     assertThat(row.getOccurredAt()).isEqualTo(OCCURRED_AT);
 
+    // What the relay reads and ships.
     assertThat(row.getPayload())
         .as(
-            "OrderPlaced wire payload must match %s exactly — key names, key ORDER, number"
-                + " formatting and the ISO-8601 instant are all contract",
+            "OrderPlaced wire payload must match %s exactly — key names, number formatting and the"
+                + " ISO-8601 instant are all contract",
             GOLDEN)
+        .isEqualTo(golden());
+
+    // The same bytes straight out of the column, so the pin does not depend on how JPA reads JSONB.
+    assertThat(jdbcTemplate.queryForObject("select payload::text from outbox_events", String.class))
+        .as("payload::text is what B17 baselines and what a consumer parses")
         .isEqualTo(golden());
   }
 
@@ -84,7 +104,6 @@ class OutboxGoldenPayloadTest extends AbstractIntegrationTest {
    * conventions has been lost.
    */
   @Test
-  @Transactional
   void orderPlacedPayload_isCamelCase_andNotTheSnakeCaseRestConvention() throws Exception {
     recordFixedOrderPlaced();
     String payload = outboxEventRepository.findAll().get(0).getPayload();
