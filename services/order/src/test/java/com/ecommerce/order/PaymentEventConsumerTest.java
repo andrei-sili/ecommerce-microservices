@@ -15,6 +15,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.event.PaymentEventConsumer;
+import com.ecommerce.order.model.InboxEvent;
 import com.ecommerce.order.model.InboxEventId;
 import com.ecommerce.order.model.OrderEntity;
 import com.ecommerce.order.model.OrderStatus;
@@ -26,6 +27,7 @@ import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -205,15 +207,33 @@ class PaymentEventConsumerTest extends AbstractIntegrationTest {
         .isTrue();
     assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCancelled")))
         .isTrue();
-    // A key that ignored event_type would also answer true for a type that never arrived.
-    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCompleted")))
-        .as("a third, never-delivered event type must NOT be reported as already processed")
-        .isFalse();
-
     // The first event owned the state transition; the second is a no-op on a terminal order.
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
         .isEqualTo(OrderStatus.PAYMENT_FAILED);
     verify(channel, times(2)).basicAck(1L, false);
+  }
+
+  /**
+   * The negative half of the composite key, kept in its own test ON PURPOSE. Asserted inside the
+   * test above it would sit behind an assertion that the same mutation trips first, so it would
+   * never execute and would read as coverage without ever being evaluated (§6.7). Here nothing
+   * shields it: one row is seeded directly, and a key that ignores {@code event_type} reports a
+   * type that was never delivered as already processed.
+   */
+  @Test
+  void neverDeliveredEventType_isNotReportedAsProcessed() {
+    String paymentId = "pay-key-negative";
+    inboxEventRepository.save(new InboxEvent(paymentId, "PaymentFailed", Instant.now()));
+
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentFailed")))
+        .as("the delivered event type is processed")
+        .isTrue();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCompleted")))
+        .as("a never-delivered event type must NOT be reported as already processed")
+        .isFalse();
+    assertThat(inboxEventRepository.existsById(new InboxEventId(paymentId, "PaymentCancelled")))
+        .as("a never-delivered event type must NOT be reported as already processed")
+        .isFalse();
   }
 
   /**
