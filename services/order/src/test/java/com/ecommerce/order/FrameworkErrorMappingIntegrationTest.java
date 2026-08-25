@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -29,6 +30,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
+import java.net.URI;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -223,15 +225,54 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/orders"))
             .andExpect(status().isUnauthorized())
+            // A9: exact, so a charset appearing on the entry point's getWriter() path is caught.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is("/api/v1/orders")))
             .andReturn();
 
+    // A7: the auth rows bypass the @RestControllerAdvice entirely (entry point / denied handler),
+    // so the problem+json guard has to be asserted here too, not only on the dispatcher rows.
+    String contentType = result.getResponse().getContentType();
+    assertFalse(
+        contentType != null && contentType.contains("problem"),
+        "401 must not use application/problem+json, was: " + contentType);
+
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     assertThat(ContractShape.keysOf(body))
         .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
     ContractShape.assertIso8601Utc(body, "timestamp");
+  }
+
+  /**
+   * {@code path} is echoed straight from {@code request.getRequestURI()}, which is attacker
+   * controlled and un-decoded. It must round-trip byte-identically: no decoding (which would let a
+   * {@code %2e%2e} segment read as {@code ..} downstream), no re-encoding, no charset mangling.
+   * Servlet 6.1 / Tomcat 11 change URI handling, so this is pinned rather than assumed.
+   */
+  @Test
+  void nonAsciiPercentEncodedPath_roundTripsByteIdentically_inTheEnvelope() throws Exception {
+    String rawPath = "/api/v1/orders/caf%C3%A9-%E2%82%AC";
+
+    MvcResult result =
+        mockMvc
+            .perform(get(URI.create(rawPath)).header("Authorization", USER))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
+            .andExpect(jsonPath("$.path", is(rawPath)))
+            .andReturn();
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(body.get("path").asText())
+        .as("the echoed path must be the raw request URI, neither decoded nor re-encoded")
+        .isEqualTo(rawPath)
+        .doesNotContain("café")
+        .doesNotContain("€");
+    assertNoLeak(result);
   }
 
   // 11b. The 409 counterpart of the pin above: the SAME record renders FIVE keys when productId is
