@@ -15,6 +15,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.cart.repository.CartRepository;
 import com.ecommerce.cart.support.AbstractIntegrationTest;
+import com.ecommerce.cart.support.JwtTestKeys;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
@@ -48,6 +49,9 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
    * Captured on 3.5.16: the entry point sets {@code application/json} with no charset parameter.
    */
   private static final String UNAUTHORIZED_CONTENT_TYPE = "application/json";
+
+  /** Distinct from every suite's business subject, so the control never shares a cart row. */
+  protected static final long CONTROL_USER_ID = 4242L;
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
@@ -116,6 +120,30 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
         0.0001,
         "a rejected token must not increment jwt.accepted.tokens");
     assertEquals(auditBefore, auditLineCount(), "a rejected token must not emit a jwt.audit line");
+
+    // F10 positive control, in the SAME method: "did not move" is free if the counter and the audit
+    // logger cannot move at all. The metrics-annotation swap, Micrometer 1.16->1.17 and the context
+    // forks these suites create are exactly the substrate the migration changes, so a run where
+    // neither direction moves must FAIL rather than read as a clean negative.
+    expectCartOk(acceptedToken(), CONTROL_USER_ID);
+
+    assertEquals(
+        acceptedBefore + 1,
+        totalAccepted(),
+        0.0001,
+        "an accepted token must increment jwt.accepted.tokens by exactly 1");
+    assertEquals(
+        auditBefore + 1,
+        auditLineCount(),
+        "an accepted token must emit exactly one jwt.audit line");
+  }
+
+  /**
+   * A token the suite's own accepted-algs configuration must accept. RS256 is the shipped posture;
+   * the HS256-rollback suite overrides this so its control is not itself a rejection.
+   */
+  protected String acceptedToken() {
+    return JwtTestKeys.mintRs256(CONTROL_USER_ID, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A);
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
