@@ -109,6 +109,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/order-archive").header("Authorization", USER))
             .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
             .andExpect(jsonPath("$.message", is("Resource not found")))
             .andExpect(jsonPath("$.path", is("/api/v1/order-archive")))
@@ -126,6 +127,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(delete(path).header("Authorization", USER))
             .andExpect(status().isMethodNotAllowed())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("METHOD_NOT_ALLOWED")))
             .andExpect(jsonPath("$.path", is(path)))
             .andExpect(header().string("Allow", containsString("GET")))
@@ -149,6 +151,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.TEXT_PLAIN)
                     .content("just some plain text"))
             .andExpect(status().isUnsupportedMediaType())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNSUPPORTED_MEDIA_TYPE")))
             .andExpect(jsonPath("$.path", is(path)))
             .andExpect(header().exists("Accept"))
@@ -170,6 +173,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{not json"))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
             .andExpect(jsonPath("$.message", is("Request body or parameter is malformed")))
             .andExpect(jsonPath("$.path", is(path)))
@@ -191,6 +195,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"status\":null}"))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("VALIDATION_ERROR")))
             .andExpect(jsonPath("$.message", containsString("status")))
             .andExpect(jsonPath("$.path", is(path)))
@@ -207,6 +212,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/orders/not-a-uuid").header("Authorization", USER))
             .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("MALFORMED_REQUEST")))
             .andExpect(jsonPath("$.path", is("/api/v1/orders/not-a-uuid")))
             .andReturn();
@@ -220,6 +226,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")));
   }
@@ -234,19 +241,30 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/api/v1/orders"))
             .andExpect(status().isUnauthorized())
+            // §4h(3): the exact Content-Type equality leads the chain, ahead of every body
+            // assertion. It previously sat only after andReturn, below the jsonPath rows, so any
+            // drift that swaps the body would have failed this row at "No value at JSON path"
+            // and named the wrong cause.
+            //
+            // This row renders on the entry-point path (401 bypasses the advice), so the
+            // ProblemDetail probe that demonstrated the difference on the framework rows in this
+            // class does not reach it — the ordering here is structural, not probe-attributed.
+            // The drift it does guard is a charset appearing on getWriter(); see
+            // WireContentTypeIntegrationTest for the container-side measurement.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
             .andExpect(jsonPath("$.path", is("/api/v1/orders")))
             .andReturn();
 
-    // A7 BEFORE A9 (§4h): the exact-contentType pin below trips on any problem+json drift too, so
-    // ordered after it this guard could never be the assertion that fails. The auth rows bypass
-    // the @RestControllerAdvice entirely (entry point / denied handler), so they need their own.
+    // Kept as documentation (§4h(2)): both are now dominated by the in-chain equality above and
+    // can no longer be the assertion that fails. They record WHY the pin is exact — the auth rows
+    // bypass the @RestControllerAdvice entirely (entry point / denied handler), and a charset
+    // appearing on the entry point's getWriter() path must not slip through.
     String contentType = result.getResponse().getContentType();
     assertFalse(
         contentType != null && contentType.contains("problem"),
         "401 must not use application/problem+json, was: " + contentType);
-    // A9: exact, so a charset appearing on the entry point's getWriter() path is caught.
     assertThat(contentType).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
@@ -305,6 +323,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-stock-keyset"))
             .andExpect(status().isConflict())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("INSUFFICIENT_STOCK")))
             .andExpect(jsonPath("$.message", is("Insufficient stock for Black T-Shirt")))
             .andExpect(jsonPath("$.path", is("/api/v1/orders")))
@@ -324,6 +343,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_elements").value(0))
         .andExpect(jsonPath("$.content").isArray());
   }
@@ -336,6 +356,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value(orderId.toString()));
   }
 
@@ -352,6 +373,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .header("Idempotency-Key", "key-stock"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("INSUFFICIENT_STOCK")))
         .andExpect(jsonPath("$.product_id").value(42));
   }
@@ -362,6 +384,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(post("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("IDEMPOTENCY_KEY_REQUIRED")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")));
   }
@@ -375,6 +398,10 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .perform(
                 post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", key))
             .andExpect(status().isCreated())
+            // The fixture reads $.id out of the body, so a representation drift on the 201 would
+            // surface as an opaque JsonPath failure inside a helper rather than naming the media
+            // type (§4h(3)). This path renders through the converter stack, not the advice.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();

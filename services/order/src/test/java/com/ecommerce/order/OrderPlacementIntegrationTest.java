@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -38,6 +39,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -100,6 +102,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-happy"))
             .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.status").value("PENDING"))
             .andExpect(jsonPath("$.currency").value("EUR"))
             .andExpect(jsonPath("$.subtotal").value(39.98))
@@ -184,6 +187,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-dates"))
             .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -197,6 +201,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
             mockMvc
                 .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
                 .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
@@ -208,6 +213,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
             mockMvc
                 .perform(get("/api/v1/orders").header("Authorization", USER))
                 .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andReturn()
                 .getResponse()
                 .getContentAsString());
@@ -269,6 +275,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .header("Idempotency-Key", "key-empty"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("EMPTY_CART"));
 
     assertThat(orderRepository.findAll()).isEmpty();
@@ -289,6 +296,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .header("Authorization", USER)
                 .header("Idempotency-Key", "key-stock"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("INSUFFICIENT_STOCK"))
         .andExpect(jsonPath("$.product_id").value(42));
 
@@ -311,6 +319,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-replay"))
             .andExpect(status().isCreated())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -323,6 +332,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                     .header("Authorization", USER)
                     .header("Idempotency-Key", "key-replay"))
             .andExpect(status().isOk())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();
@@ -343,6 +353,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", OTHER_USER))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("ORDER_NOT_FOUND"));
   }
 
@@ -353,6 +364,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value(orderId.toString()));
   }
 
@@ -363,6 +375,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders/" + orderId).header("Authorization", ADMIN))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.id").value(orderId.toString()));
   }
 
@@ -374,6 +387,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_elements").value(2))
         .andExpect(jsonPath("$.content.length()").value(2))
         // Items are batch-loaded for the page; the list response keeps the full per-order shape.
@@ -384,6 +398,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", OTHER_USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.total_elements").value(0));
   }
 
@@ -399,6 +414,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders?page=0&size=2").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         // D7: the pagination envelope is EXACTLY five top-level keys. Individual jsonPaths cannot
         // see a sixth key appear, and the envelope is what every list client parses.
         .andExpect(jsonPath("$.*", hasSize(5)))
@@ -414,6 +430,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders?page=1&size=2").header("Authorization", USER))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.page").value(1))
         .andExpect(jsonPath("$.content.length()").value(1));
   }
@@ -431,6 +448,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
@@ -448,6 +466,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     // Retry of cancel on an already-CANCELLED order: 200 with the order, no second release.
@@ -458,6 +477,7 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
                 .contentType("application/json")
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
 
     assertThat(orderRepository.findById(orderId).orElseThrow().getStatus())
@@ -521,6 +541,10 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
             .perform(
                 post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", key))
             .andExpect(status().isCreated())
+            // The fixture reads $.id out of the body, so a representation drift on the 201 would
+            // surface as an opaque JsonPath failure inside a helper rather than naming the media
+            // type (§4h(3)). This path renders through the converter stack, not the advice.
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
             .getContentAsString();

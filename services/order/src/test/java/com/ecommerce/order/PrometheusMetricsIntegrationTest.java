@@ -63,6 +63,7 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")));
   }
@@ -94,6 +95,7 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/actuator/prometheus"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")));
   }
 
