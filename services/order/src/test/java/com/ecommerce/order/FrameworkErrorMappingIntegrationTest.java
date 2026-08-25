@@ -242,11 +242,15 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .perform(get("/api/v1/orders"))
             .andExpect(status().isUnauthorized())
             // §4h(3): the exact Content-Type equality leads the chain, ahead of every body
-            // assertion. Previously it lived only after andReturn, below the jsonPath rows — so
-            // any drift that swaps the body (Spring's own ProblemDetail path) failed this row at
-            // "No value at JSON path" and named the wrong cause. Measured: with the envelope
-            // substituted, the five rows ordered this way reported the path; this one reported
-            // the media type.
+            // assertion. It previously sat only after andReturn, below the jsonPath rows, so any
+            // drift that swaps the body would have failed this row at "No value at JSON path"
+            // and named the wrong cause.
+            //
+            // This row renders on the entry-point path (401 bypasses the advice), so the
+            // ProblemDetail probe that demonstrated the difference on the framework rows in this
+            // class does not reach it — the ordering here is structural, not probe-attributed.
+            // The drift it does guard is a charset appearing on getWriter(); see
+            // WireContentTypeIntegrationTest for the container-side measurement.
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
@@ -394,8 +398,9 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .perform(
                 post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", key))
             .andExpect(status().isCreated())
-            // The fixture reads $.id out of the body; without this the same envelope drift shows
-            // up here as an opaque JsonPath failure inside a helper (§4h(3)).
+            // The fixture reads $.id out of the body, so a representation drift on the 201 would
+            // surface as an opaque JsonPath failure inside a helper rather than naming the media
+            // type (§4h(3)). This path renders through the converter stack, not the advice.
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()

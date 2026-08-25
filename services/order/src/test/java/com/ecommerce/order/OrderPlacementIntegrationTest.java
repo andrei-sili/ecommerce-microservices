@@ -541,8 +541,9 @@ class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
             .perform(
                 post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", key))
             .andExpect(status().isCreated())
-            // The fixture reads $.id out of the body; without this the same envelope drift shows
-            // up here as an opaque JsonPath failure inside a helper (§4h(3)).
+            // The fixture reads $.id out of the body, so a representation drift on the 201 would
+            // surface as an opaque JsonPath failure inside a helper rather than naming the media
+            // type (§4h(3)). This path renders through the converter stack, not the advice.
             .andExpect(content().contentType(MediaType.APPLICATION_JSON))
             .andReturn()
             .getResponse()
