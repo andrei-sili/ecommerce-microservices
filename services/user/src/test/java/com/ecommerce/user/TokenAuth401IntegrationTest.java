@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -45,6 +46,14 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
   private static final String PROFILE_PATH = "/api/v1/users/me";
   private static final String VALID_PASSWORD = "Sup3rSecret12";
 
+  /**
+   * The 200 profile body travels the message-converter stack, not the entry point that renders the
+   * 401s asserted below, so it is measured separately even though it lands on the same string.
+   * Measured at 13042d9: {@code getContentType()} and the raw header both {@code application/json}.
+   * Not borrowed from the error constant — the two can drift apart.
+   */
+  private static final String PROFILE_200_CONTENT_TYPE = "application/json";
+
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private JwtProperties jwtProperties;
@@ -72,6 +81,9 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get(PROFILE_PATH).header("Authorization", "Bearer " + mintValidToken(userId)))
         .andExpect(status().isOk())
+        // Media type before the body, as on every other row: a drift here would otherwise be
+        // reported as a missing $.email rather than as a changed Content-Type.
+        .andExpect(content().contentType(PROFILE_200_CONTENT_TYPE))
         .andExpect(jsonPath("$.email", is("control@example.com")));
   }
 
