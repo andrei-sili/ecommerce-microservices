@@ -1,5 +1,7 @@
 package com.ecommerce.product;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 import com.ecommerce.product.support.JwtTestKeys;
 import java.nio.charset.StandardCharsets;
 import java.util.stream.Stream;
@@ -28,6 +30,46 @@ class Rs256OnlyValidationIntegrationTest extends AbstractDualAcceptTest {
   @Test
   void rs256_stillAccepted_provingConfigIsLive() throws Exception {
     expectCreated(JwtTestKeys.mintRs256(SUBJECT, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+  }
+
+  /**
+   * Positive control for the {@code jwt.accepted.tokens} signal, paired with its negative in ONE
+   * method.
+   *
+   * <p>Every abuse row in this suite asserts that the counter did NOT move and no audit line was
+   * emitted. That assertion is satisfied just as well by an instrument that never moves at all — a
+   * dead counter, an unregistered meter, an audit logger detached by a context refresh — so the
+   * whole negative signal can go vacuous without a single test turning red. Moving the counter by
+   * exactly 1.0 first, then showing it flat across a rejection, is what makes the negative
+   * meaningful: the instrument is demonstrably live in the same context, in the same method.
+   */
+  @Test
+  void acceptedTokenMovesTheCounterByOne_rejectedTokenLeavesItFlat() throws Exception {
+    double acceptedBefore = totalAccepted();
+    int auditBefore = auditLineCount();
+
+    expectCreated(JwtTestKeys.mintRs256(SUBJECT, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A));
+
+    assertEquals(
+        acceptedBefore + 1.0,
+        totalAccepted(),
+        0.0001,
+        "an accepted RS256 token must move jwt.accepted.tokens by exactly 1.0");
+    assertEquals(
+        auditBefore + 1,
+        auditLineCount(),
+        "an accepted RS256 token must emit exactly one jwt.audit line");
+    assertAudited("JWT accepted alg=RS256 kid=" + JwtTestKeys.KID_A);
+
+    double acceptedAfterPositive = totalAccepted();
+    int auditAfterPositive = auditLineCount();
+
+    // Same context, same method: a rejected token must leave both signals untouched.
+    expectUnauthorizedEnvelope(
+        JwtTestKeys.mintRs256(SUBJECT, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_WRONG));
+
+    assertEquals(acceptedAfterPositive, totalAccepted(), 0.0001);
+    assertEquals(auditAfterPositive, auditLineCount());
   }
 
   @Test
