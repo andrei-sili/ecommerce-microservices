@@ -35,8 +35,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
- * Wire-shape pin for the cart body, captured on 3.5.16 as {@code baselines/boot4/shapes/cart.shape}
- * and asserted here as an EXACT key set per level plus an exact JSON node type per key.
+ * Wire-shape pin for the cart body, captured on 3.5.16 from {@code GET /api/v1/cart} as {@code
+ * baselines/boot4/shapes/cart-with-items.shape} and {@code cart-empty.shape}, and asserted here as
+ * an EXACT key set per level plus an exact JSON node type per key. Every shape row therefore reads
+ * the GET response: the write paths render through the same DTO today, so pinning a POST body would
+ * leave the captured endpoint unguarded.
  *
  * <p>Two properties of the current serializer are load-bearing and invisible to a subset assertion.
  * (1) {@code currency} is present only when the cart holds items — it survives on {@code
@@ -99,7 +102,7 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   @Test
   void cartWithItems_hasExactlyThePinnedSnakeCaseKeys_atEveryLevel() throws Exception {
-    JsonNode body = bodyOf(addTwoShirts());
+    JsonNode body = seedThenReadCart();
 
     assertEquals(CART_KEYS, keysOf(body), "cart body key set drifted from the 3.5.16 capture");
     assertEquals(1, body.get("items").size());
@@ -110,7 +113,7 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   @Test
   void cartWithItems_rendersEachKeyWithThePinnedJsonType_andValue() throws Exception {
-    JsonNode body = bodyOf(addTwoShirts());
+    JsonNode body = seedThenReadCart();
     JsonNode item = body.get("items").get(0);
 
     assertTrue(body.get("user_id").isIntegralNumber(), "user_id must stay a JSON integer");
@@ -141,7 +144,7 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   @Test
   void cartDateFields_areIso8601UtcStrings_notEpochNumbers() throws Exception {
-    JsonNode body = bodyOf(addTwoShirts());
+    JsonNode body = seedThenReadCart();
     String updatedAt = body.get("updated_at").asText();
     String snapshotAt = body.get("items").get(0).get("snapshot_at").asText();
 
@@ -157,11 +160,7 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   @Test
   void emptyCart_omitsCurrencyEntirely_andKeepsTheOtherFiveKeys() throws Exception {
-    JsonNode body =
-        bodyOf(
-            mockMvc
-                .perform(get("/api/v1/cart").header("Authorization", USER_7))
-                .andExpect(status().isOk()));
+    JsonNode body = readCart();
 
     assertEquals(EMPTY_CART_KEYS, keysOf(body), "empty cart must not gain a null currency key");
     assertFalse(body.has("currency"), "currency must be OMITTED on an empty cart, never null");
@@ -172,11 +171,18 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
     assertTrue(ISO_8601_UTC.matcher(body.get("updated_at").asText()).matches());
   }
 
+  /**
+   * The write bodies are compared against the READ body of the same cart, not against the constants
+   * — so this row stays true to its name even if the pinned key set itself is edited, and a read
+   * path that starts diverging from the write paths fails here rather than passing both ways.
+   */
   @Test
   void writePaths_renderTheSameShapeAsTheReadPath() throws Exception {
     JsonNode created = bodyOf(addTwoShirts());
-    assertEquals(CART_KEYS, keysOf(created), "201 body must carry the pinned cart key set");
-    assertEquals(ITEM_KEYS, keysOf(created.get("items").get(0)));
+    JsonNode read = readCart();
+
+    assertEquals(keysOf(read), keysOf(created), "201 body must mirror the GET key set");
+    assertEquals(keysOf(read.get("items").get(0)), keysOf(created.get("items").get(0)));
     assertTrue(ISO_8601_UTC.matcher(created.get("updated_at").asText()).matches());
 
     JsonNode updated =
@@ -188,8 +194,10 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"quantity\":1}"))
                 .andExpect(status().isOk()));
-    assertEquals(CART_KEYS, keysOf(updated), "200 body must carry the pinned cart key set");
-    assertEquals(ITEM_KEYS, keysOf(updated.get("items").get(0)));
+    JsonNode readAfterUpdate = readCart();
+
+    assertEquals(keysOf(readAfterUpdate), keysOf(updated), "200 body must mirror the GET key set");
+    assertEquals(keysOf(readAfterUpdate.get("items").get(0)), keysOf(updated.get("items").get(0)));
     assertTrue(
         ISO_8601_UTC.matcher(updated.get("items").get(0).get("snapshot_at").asText()).matches());
   }
@@ -202,6 +210,23 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":2}"))
         .andExpect(status().isCreated());
+  }
+
+  /**
+   * Seeds through the write path but returns the body of {@code GET /api/v1/cart} — the endpoint
+   * the {@code cart-with-items.shape} baseline was captured from. The POST body happens to render
+   * through the same DTO today, so asserting it would leave a read path that drifts alone green.
+   */
+  private JsonNode seedThenReadCart() throws Exception {
+    addTwoShirts();
+    return readCart();
+  }
+
+  private JsonNode readCart() throws Exception {
+    return bodyOf(
+        mockMvc
+            .perform(get("/api/v1/cart").header("Authorization", USER_7))
+            .andExpect(status().isOk()));
   }
 
   private JsonNode bodyOf(ResultActions actions) throws Exception {
