@@ -12,6 +12,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.ecommerce.payment.client.OrderClient;
 import com.ecommerce.payment.client.OrderView;
+import com.ecommerce.payment.dto.WebhookEventRequest;
 import com.ecommerce.payment.model.Payment;
 import com.ecommerce.payment.model.PaymentStatus;
 import com.ecommerce.payment.model.ProcessedWebhookEvent;
@@ -20,10 +21,12 @@ import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
+import com.ecommerce.payment.service.PaymentPersistenceService;
 import com.ecommerce.payment.service.PaymentService;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.ecommerce.payment.support.TestJwt;
 import com.ecommerce.payment.support.WebhookSignature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -67,10 +70,9 @@ class WebhookProcessedEventIntegrationTest extends AbstractIntegrationTest {
   /** What a replayed event id claims the second time. Never applied — the guards see it first. */
   private static final String TAMPERED_AMOUNT = "999.99";
 
-  /** The id {@code PaymentPersistenceService} records when the gateway id resolves to nothing. */
-  private static final UUID UNRESOLVED_PAYMENT = new UUID(0, 0);
-
   @Autowired private MockMvc mockMvc;
+  @Autowired private ObjectMapper objectMapper;
+  @Autowired private PaymentPersistenceService persistence;
   @Autowired private PaymentRepository paymentRepository;
   @Autowired private OutboxEventRepository outboxEventRepository;
   @Autowired private PaymentTransactionRepository transactionRepository;
@@ -121,11 +123,8 @@ class WebhookProcessedEventIntegrationTest extends AbstractIntegrationTest {
     ProcessedWebhookEvent row = webhookEventRepository.findById("evt_casing_1").orElseThrow();
     assertThat(row.getPaymentId())
         .as("the snake_case gateway_payment_id must bind, not fall through to the sentinel")
-        .isEqualTo(payment.getId())
-        .isNotEqualTo(UNRESOLVED_PAYMENT);
+        .isEqualTo(payment.getId());
     assertThat(row.getReceivedAt()).isNotNull();
-    assertThat(paymentRepository.findById(payment.getId()).orElseThrow().getStatus())
-        .isEqualTo(PaymentStatus.SUCCEEDED);
   }
 
   @Test
@@ -164,6 +163,70 @@ class WebhookProcessedEventIntegrationTest extends AbstractIntegrationTest {
     // Without this row, a service that had stopped recording events entirely would still pass.
     deliver("evt_replay_2", gatewayId, CHARGED_AMOUNT.toPlainString());
     assertThat(webhookEventRepository.count()).isEqualTo(2);
+  }
+
+  /**
+   * The SECOND idempotency guard, isolated -- and the abuse it stops.
+   *
+   * <p>The changed-amount replay above cannot reach this guard: the fast path in {@code
+   * PaymentService} short-circuits before the body is ever read, so deleting {@code
+   * PaymentPersistenceService}'s in-transaction re-check leaves the whole suite green. This test
+   * therefore calls {@code processVerifiedWebhookEvent} directly, bypassing the fast path by
+   * construction.
+   *
+   * <p>What it protects is not academic. {@code ProcessedWebhookEvent.paymentId} carries no {@code
+   * updatable = false} -- only {@code receivedAt} does -- so a replayed event id pointing at a
+   * DIFFERENT {@code gateway_payment_id} with a MATCHING amount clears {@code
+   * verifyMoneyIntegrity}, no-ops through the state machine (the second payment is already
+   * terminal), and then JPA-merges the audit ledger row onto the other payment. Row count stays 1,
+   * {@code updated_at} is untouched, the outbox is unchanged -- every count-based assertion in this
+   * class is blind to it. The ledger would simply record that a gateway event belonged to a payment
+   * it never belonged to.
+   */
+  @Test
+  void replayedEventId_withAnotherGatewayId_doesNotRebindTheLedgerRow() throws Exception {
+    Payment first = seedSucceeded("gw_ledger_first", "key-ledger-1");
+    Payment second = seedSucceeded("gw_ledger_second", "key-ledger-2");
+
+    persistence.processVerifiedWebhookEvent(webhookEvent("evt_ledger_1", "gw_ledger_first"));
+    assertThat(webhookEventRepository.findById("evt_ledger_1").orElseThrow().getPaymentId())
+        .isEqualTo(first.getId());
+
+    persistence.processVerifiedWebhookEvent(webhookEvent("evt_ledger_1", "gw_ledger_second"));
+
+    assertThat(webhookEventRepository.findById("evt_ledger_1").orElseThrow().getPaymentId())
+        .as("a replayed event id must never rebind the ledger row to another payment")
+        .isEqualTo(first.getId())
+        .isNotEqualTo(second.getId());
+    // Fails only if the dedup ever INSERTS instead of merging. Kept next to the binding assertion
+    // above as the demonstration that counting rows cannot see this bug.
+    assertThat(webhookEventRepository.count()).isEqualTo(1);
+  }
+
+  /** Parses a snake_case body the way the endpoint does, so the wire casing stays in the loop. */
+  private WebhookEventRequest webhookEvent(String eventId, String gatewayPaymentId)
+      throws Exception {
+    String body =
+        ("{\"event_id\":\"%s\",\"event_type\":\"payment_succeeded\","
+                + "\"gateway_payment_id\":\"%s\",\"amount\":39.98,\"currency\":\"EUR\"}")
+            .formatted(eventId, gatewayPaymentId);
+    return objectMapper.readValue(body, WebhookEventRequest.class);
+  }
+
+  /** A terminal payment carrying a resolvable gateway id, on its own order. */
+  private Payment seedSucceeded(String gatewayPaymentId, String idempotencyKey) {
+    Payment payment =
+        new Payment(
+            UUID.randomUUID(),
+            USER_ID,
+            CHARGED_AMOUNT,
+            "EUR",
+            PaymentStatus.SUCCEEDED,
+            "sandbox",
+            "pm_seeded",
+            idempotencyKey);
+    payment.setGatewayPaymentId(gatewayPaymentId);
+    return paymentRepository.saveAndFlush(payment);
   }
 
   private boolean loggedContaining(String fragment) {

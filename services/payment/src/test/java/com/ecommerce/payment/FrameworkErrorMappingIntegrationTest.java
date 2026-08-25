@@ -245,19 +245,20 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
    * <p>Three separate things, all previously unpinned here: the {@code Content-Type} is the EXACT
    * string captured on 3.5.16 ({@code contentTypeCompatibleWith} and {@code
    * containsString("application/json")} both accept {@code application/problem+json} and both
-   * ignore a charset); it is explicitly not problem+json, which is where Boot would move these
-   * bodies if {@code ResponseEntityExceptionHandler} started emitting {@code ProblemDetail}; and
-   * the body leaks no internals.
+   * ignore a charset); and the body leaks no internals.
+   *
+   * <p>The equality IS A7's problem+json guard — nothing that equals {@code application/json} can
+   * be {@code application/problem+json} — so the separate {@code
+   * assertFalse(contentType.contains("problem"))} the contract describes is deliberately NOT used
+   * here. Under an equality it is dead weight, and on its own it is worse than dead: when the write
+   * actually fails, {@code getContentType()} comes back null and {@code contentType != null &&
+   * contains("problem")} evaluates false, so that form goes GREEN on the very drift it names.
    */
   private void assertJsonEnvelope(MvcResult result) throws Exception {
-    String contentType = result.getResponse().getContentType();
     assertEquals(
         "application/json",
-        contentType,
-        "framework error must render the exact captured JSON type");
-    assertFalse(
-        contentType != null && contentType.contains("problem"),
-        "framework error must not use application/problem+json, was: " + contentType);
+        result.getResponse().getContentType(),
+        "framework error must render the exact captured JSON type, never problem+json");
 
     String body = result.getResponse().getContentAsString();
     for (String forbidden :

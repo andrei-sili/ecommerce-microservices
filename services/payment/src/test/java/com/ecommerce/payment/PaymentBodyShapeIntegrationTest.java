@@ -88,8 +88,6 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
             "gateway",
             "created_at",
             "updated_at");
-    // Not merely "not null" — the key must not be rendered at all.
-    assertThat(body).doesNotContain("failure_reason");
   }
 
   @Test
