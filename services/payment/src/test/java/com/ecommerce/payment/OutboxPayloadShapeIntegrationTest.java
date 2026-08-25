@@ -80,9 +80,13 @@ class OutboxPayloadShapeIntegrationTest extends AbstractIntegrationTest {
             "paymentId", "orderId", "userId", "amount", "currency", "status", "occurredAt");
     assertThat(JsonPath.<String>read(payload, "$.status")).isEqualTo("SUCCEEDED");
     JsonShape.assertIso8601Utc(payload, "occurredAt");
-    // A succeeded charge carries no failure reason at all — the key set above is the guard, this
-    // makes the intent explicit against the PaymentFailed row below.
-    assertThat(payload).doesNotContain("failureReason");
+
+    // Money and ids stay unquoted JSON numbers. This replaced a doesNotContain("failureReason")
+    // that was unfalsifiable -- PaymentCompletedPayload is a record with no such component, so no
+    // change to the codebase could ever have made that line fail. WRITE_NUMBERS_AS_STRINGS on this
+    // mapper would break every consumer's amount arithmetic silently; these two lines go red on it.
+    JsonShape.assertJsonNumber(payload, "amount", 39.98);
+    JsonShape.assertJsonNumber(payload, "userId", 7);
   }
 
   @Test
