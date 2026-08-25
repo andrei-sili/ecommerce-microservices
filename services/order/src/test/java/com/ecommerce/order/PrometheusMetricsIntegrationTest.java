@@ -33,6 +33,9 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
 
   private static final String PROMETHEUS_PATH = "/actuator/prometheus";
 
+  /** Captured at 3.5.16; the scrape parser is selected from these parameters, not from the type. */
+  private static final String PROMETHEUS_CONTENT_TYPE = "text/plain;version=0.0.4;charset=utf-8";
+
   @Autowired private MockMvc mockMvc;
 
   // Criterion: GIVEN the app running, WHEN GET /actuator/prometheus with NO auth header,
@@ -42,8 +45,11 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get(PROMETHEUS_PATH))
         .andExpect(status().isOk())
-        // Micrometer's scrape endpoint negotiates to the classic text exposition format.
-        .andExpect(content().contentTypeCompatibleWith("text/plain"))
+        // Micrometer's scrape endpoint negotiates to the classic text exposition format. Pinned
+        // EXACTLY (version + charset included): Prometheus selects the parser from these
+        // parameters, so a drift to the OpenMetrics content type is a scrape-breaking change that
+        // `contentTypeCompatibleWith("text/plain")` cannot see.
+        .andExpect(content().contentType(PROMETHEUS_CONTENT_TYPE))
         // Prometheus exposition markers + a metric family that always exists on a JVM app.
         .andExpect(content().string(containsString("# HELP")))
         .andExpect(content().string(containsString("# TYPE")))
@@ -69,7 +75,7 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/orders").header("Authorization", "Bearer not-a-real-jwt"))
         .andExpect(status().isUnauthorized())
-        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
         .andExpect(jsonPath("$.message", is("Authentication required")))
         .andExpect(jsonPath("$.path", is("/api/v1/orders")))
@@ -99,6 +105,6 @@ class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get(PROMETHEUS_PATH).header("Authorization", token))
         .andExpect(status().isOk())
-        .andExpect(header().string("Content-Type", containsString("text/plain")));
+        .andExpect(header().string("Content-Type", PROMETHEUS_CONTENT_TYPE));
   }
 }

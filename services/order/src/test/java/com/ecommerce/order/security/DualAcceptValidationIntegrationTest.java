@@ -224,7 +224,7 @@ class DualAcceptValidationIntegrationTest extends AbstractDualAcceptTest {
                         + JwtTestKeys.mintRs256(
                             attackerId, JwtTestKeys.KID_A, JwtTestKeys.KEY_PAIR_A)))
         .andExpect(status().isNotFound())
-        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error", is("ORDER_NOT_FOUND")));
 
     // A valid token that is authorization-denied is still an ACCEPTED token: the counter/audit
