@@ -42,8 +42,15 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
- * B11 — the webhook pinned by its EFFECT, not by its status code, and the replay pinned so that
+ * The webhook pinned by its EFFECT rather than its status code, and the replay pinned so that
  * deleting the idempotency guards is RED.
+ *
+ * <p><b>This does not discharge B11.</b> The MockMvc form cannot: payment's {@code
+ * src/test/resources/application.yml} shadows the shipped file, so the snake_case naming strategy
+ * these assertions depend on is the TEST yml's, and a casing flip in production config stays
+ * invisible here. What this class gives is the in-suite effect assertion — the row must exist and
+ * bind to the real payment, so a status-only regression is caught. B11 on the wire is compose/smoke
+ * evidence, driven directly at the payment container.
  *
  * <p>The endpoint answers 200 to a body it could not use: {@code PaymentService} logs a WARN and
  * returns 200 when {@code event_id} is missing, and the persistence service acks an unresolvable

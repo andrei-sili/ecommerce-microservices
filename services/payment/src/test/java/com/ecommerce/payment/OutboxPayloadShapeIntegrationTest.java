@@ -81,10 +81,12 @@ class OutboxPayloadShapeIntegrationTest extends AbstractIntegrationTest {
     assertThat(JsonPath.<String>read(payload, "$.status")).isEqualTo("SUCCEEDED");
     JsonShape.assertIso8601Utc(payload, "occurredAt");
 
-    // Money and ids stay unquoted JSON numbers. This replaced a doesNotContain("failureReason")
-    // that was unfalsifiable -- PaymentCompletedPayload is a record with no such component, so no
-    // change to the codebase could ever have made that line fail. WRITE_NUMBERS_AS_STRINGS on this
-    // mapper would break every consumer's amount arithmetic silently; these two lines go red on it.
+    // Money and ids stay unquoted JSON numbers. These replaced a doesNotContain("failureReason")
+    // that was DOMINATED, not unfalsifiable (§4h(2)): the exact key set asserted above fails first
+    // on any extra key, so that line could never be the failing one. A doesNotContain with NO
+    // dominating assertion above it is the opposite -- a live leak guard, and must not be swept.
+    // WRITE_NUMBERS_AS_STRINGS on this mapper would break every consumer's amount arithmetic
+    // silently; these two lines go red on it.
     JsonShape.assertJsonNumber(payload, "amount", 39.98);
     JsonShape.assertJsonNumber(payload, "userId", 7);
   }
