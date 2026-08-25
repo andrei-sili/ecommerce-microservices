@@ -31,28 +31,47 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
 
+  private static final String ACTUATOR_JSON = "application/vnd.spring-boot.actuator.v3+json";
+
+  /**
+   * The SHIPPED body, byte-for-byte. {@code management.endpoint.health.show-details} is set nowhere
+   * in this repo, so production runs the default {@code never}; cart has no {@code
+   * src/test/resources}, so this row reads the real {@code application.yml} and is evidence about
+   * production, not about a test fixture. A {@code $.status} subset assertion cannot see a flipped
+   * default, which would disclose the DB product and version to any unauthenticated caller on
+   * {@code ecommerce-net} or in namespace {@code ecommerce} (F4).
+   *
+   * <p>The {@code groups} array is part of the shipped disclosure — {@code
+   * management.endpoint.health.probes.enabled: true} registers the liveness/readiness groups and
+   * the aggregate endpoint lists them even at {@code show-details: never}.
+   */
   @Test
-  void health_tokenless_returns200_up() throws Exception {
+  void health_tokenless_returns200_withTheExactShippedBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status", is("UP")));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
   }
 
+  /** Byte-equal {@code {"status":"UP"}} — no {@code components}, no {@code details} (F4). */
   @Test
-  void healthReadiness_tokenless_returns200_up() throws Exception {
+  void healthReadiness_tokenless_returns200_withTheExactShippedBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health/readiness"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status", is("UP")));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\"}"));
   }
 
+  /** Byte-equal {@code {"status":"UP"}} — no {@code components}, no {@code details} (F4). */
   @Test
-  void healthLiveness_tokenless_returns200_up() throws Exception {
+  void healthLiveness_tokenless_returns200_withTheExactShippedBody() throws Exception {
     mockMvc
         .perform(get("/actuator/health/liveness"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.status", is("UP")));
+        .andExpect(content().contentType(ACTUATOR_JSON))
+        .andExpect(content().string("{\"status\":\"UP\"}"));
   }
 
   /**
@@ -66,7 +85,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/actuator/info"))
         .andExpect(status().isOk())
-        .andExpect(content().contentType("application/vnd.spring-boot.actuator.v3+json"))
+        .andExpect(content().contentType(ACTUATOR_JSON))
         .andExpect(content().string("{}"));
   }
 
