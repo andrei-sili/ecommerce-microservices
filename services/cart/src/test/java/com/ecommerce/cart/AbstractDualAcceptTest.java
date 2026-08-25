@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -25,7 +26,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpHeaders;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
@@ -42,6 +43,11 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
   protected static final String CART_PATH = "/api/v1/cart";
+
+  /**
+   * Captured on 3.5.16: the entry point sets {@code application/json} with no charset parameter.
+   */
+  private static final String UNAUTHORIZED_CONTENT_TYPE = "application/json";
 
   @Autowired protected MockMvc mockMvc;
   @Autowired protected ObjectMapper objectMapper;
@@ -113,13 +119,29 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
   }
 
   protected void expectUnauthorizedEnvelope(ResultActions actions) throws Exception {
+    expectUnauthorizedEnvelopeForPath(actions, CART_PATH);
+  }
+
+  /**
+   * The 401 envelope, with {@code path} asserted against the caller-supplied URI so the row can
+   * also be driven on a non-ASCII path.
+   *
+   * <p>The media type is pinned as the EXACT captured string (A9). {@code
+   * contentTypeCompatibleWith} ignores media-type parameters, so a charset appearing on the entry
+   * point's {@code response.getWriter()} path — Boot 4.1 ships Tomcat 11 / Servlet 6.1, which is a
+   * different container charset path than {@code getOutputStream()} — would satisfy it while
+   * changing the bytes every client sees.
+   */
+  protected void expectUnauthorizedEnvelopeForPath(ResultActions actions, String expectedPath)
+      throws Exception {
     MvcResult result =
         actions
             .andExpect(status().isUnauthorized())
-            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andExpect(content().contentType(UNAUTHORIZED_CONTENT_TYPE))
+            .andExpect(header().string(HttpHeaders.CONTENT_TYPE, UNAUTHORIZED_CONTENT_TYPE))
             .andExpect(jsonPath("$.error", is("UNAUTHORIZED")))
             .andExpect(jsonPath("$.message", is("Authentication required")))
-            .andExpect(jsonPath("$.path", is(CART_PATH)))
+            .andExpect(jsonPath("$.path", is(expectedPath)))
             .andExpect(jsonPath("$.timestamp", notNullValue()))
             .andReturn();
 

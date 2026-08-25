@@ -33,6 +33,9 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
 
   private static final String ACTUATOR_JSON = "application/vnd.spring-boot.actuator.v3+json";
 
+  /** The error-envelope media type, captured exactly — a charset or problem+json drift fails. */
+  private static final String ENVELOPE_JSON = "application/json";
+
   /**
    * The SHIPPED body, byte-for-byte. {@code management.endpoint.health.show-details} is set nowhere
    * in this repo, so production runs the default {@code never}; cart has no {@code
@@ -98,6 +101,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
     mockMvc
         .perform(get("/api/v1/cart"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(ENVELOPE_JSON))
         .andExpect(jsonPath("$.error", is("UNAUTHORIZED")));
   }
 
@@ -115,6 +119,8 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         mockMvc
             .perform(get("/actuator/env").header("Authorization", "Bearer " + token))
             .andExpect(status().isForbidden())
+            // A7: the access-denied handler must keep application/json, never problem+json.
+            .andExpect(content().contentType(ENVELOPE_JSON))
             .andExpect(jsonPath("$.error", is("FORBIDDEN")))
             .andExpect(jsonPath("$.message", is("Insufficient permissions")))
             .andExpect(jsonPath("$.path", is("/actuator/env")))
