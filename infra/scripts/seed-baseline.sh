@@ -11,7 +11,7 @@
 #   - 2 categories; 5 active products + 1 soft-deleted, with `zzq` in exactly 2 product names
 #   - 2 units of one product in the user's cart
 #   - 1 placed order
-#   - 1 charged payment (COMPLETED) and 1 declined payment (FAILED)
+#   - 1 charged payment (SUCCEEDED) and 1 declined payment (FAILED)
 #   - 1 stock rejection (409) from an over-quantity reservation
 #
 # Usage: infra/scripts/seed-baseline.sh [--base-url URL]
@@ -98,7 +98,7 @@ ORDER_ID=$(printf '%s' "$ORDER" | j "['id']")
 [ -n "$ORDER_ID" ] || { echo "FATAL: no order id; body was: $ORDER"; exit 1; }
 echo "   order: $ORDER_ID"
 
-step "payment 1/2 — charge (expect COMPLETED)"
+step "payment 1/2 — charge (expect SUCCEEDED)"
 idem POST /api/v1/payments "$USER_T" "seed-ok-$STAMP" \
   "{\"order_id\":\"$ORDER_ID\",\"payment_method_token\":\"tok_seed_ok_$STAMP\"}" | head -c 260; echo
 
