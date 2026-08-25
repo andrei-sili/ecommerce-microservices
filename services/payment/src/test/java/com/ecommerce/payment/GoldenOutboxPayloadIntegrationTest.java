@@ -61,6 +61,10 @@ class GoldenOutboxPayloadIntegrationTest extends AbstractIntegrationTest {
    * ISO-8601 string and {@code amount} as an unquoted number. Every one of those five properties
    * rests on {@code OutboxService}'s hand-built {@code JsonMapper} and none of them survives a
    * silent default change.
+   *
+   * <p><b>This is a canary, NOT a wire contract.</b> No consumer ever sees these bytes. If it ever
+   * disagrees with {@code golden/payment-completed.json}, the fixture is right and this string is
+   * what moved — reconcile in that direction only, and never "fix" the fixture to match here.
    */
   private static final String EXPECTED_SERIALIZER_BYTES =
       "{\"paymentId\":\"b1e70000-1111-2222-3333-444455556666\","
