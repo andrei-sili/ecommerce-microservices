@@ -200,6 +200,12 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
 
   // 9. Domain mapping still works through the new advice: a NotFoundException surfaces as 404 with
   // its own machine code (setItemQuantity on an item absent from the auto-created empty cart).
+  //
+  // The assertEnvelopeContentType guard below is present, asserts exact equality, and runs ahead
+  // of the body — correct as written. What it has not had is a falsification: this row renders
+  // through handleApi, which the B2 substitution probe cannot reach. The helper itself is known
+  // to fire, having gone red on the framework rows in this same class. A mutation on handleApi
+  // would settle this row.
   @Test
   void domainException_cartItemNotFound_returns404() throws Exception {
     ResultActions actions =

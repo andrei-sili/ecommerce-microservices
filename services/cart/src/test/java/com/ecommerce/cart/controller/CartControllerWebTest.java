@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -179,6 +180,14 @@ class CartControllerWebTest {
   }
 
   // ---- Error mappings from the service ----
+  //
+  // These rows render through GlobalExceptionHandler.handleApi (ApiException), not through
+  // handleExceptionInternal. The substitution probe used to attribute the validation rows below —
+  // handleExceptionInternal rendering ProblemDetail.forStatus instead of the envelope — cannot
+  // reach handleApi, so it never exercised these rows. Their media type is therefore unverified in
+  // either direction: not shown guarded, not shown unguarded. Settling it needs a mutation on
+  // handleApi itself, with the same paired counterfactual (red on the mutated rendering, green on
+  // the shipped one).
 
   @Test
   void addItem_unavailableProduct_returns409() throws Exception {
@@ -251,6 +260,15 @@ class CartControllerWebTest {
   }
 
   // ---- Validation ----
+  //
+  // These three rows render through GlobalExceptionHandler.handleMethodArgumentNotValid ->
+  // handleExceptionInternal, the same single body-rewrite point as the framework-error rows. Per
+  // §4h(3) the exact media-type equality runs BEFORE the body assertion: every way this path drifts
+  // (a ProblemDetail body, a converter that cannot write the envelope) also destroys the body, so a
+  // leading jsonPath reports `No value at JSON path "$.error"` and points the reader at the wrong
+  // cause. Measured with the sanctioned substitution probe (handleExceptionInternal renders
+  // ProblemDetail.forStatus): with the jsonPath first all three said "No value at JSON path"; with
+  // the equality first they name application/problem+json.
 
   @Test
   void addItem_invalidQuantity_returns400() throws Exception {
@@ -261,6 +279,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":0}"))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
     verifyNoInteractions(cartService);
   }
@@ -274,6 +293,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":101}"))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
     verifyNoInteractions(cartService);
   }
@@ -287,6 +307,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":0}"))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
     verifyNoInteractions(cartService);
   }
