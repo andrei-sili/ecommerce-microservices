@@ -24,6 +24,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * Full-context guard for framework/dispatcher error mapping on the Cart service: unmapped path,
@@ -57,21 +58,25 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
   // application/json (not problem+json), no internal leak.
   @Test
   void unmappedPath_returns404_withEnvelope_andJsonContentType_noLeak() throws Exception {
-    MvcResult result =
-        mockMvc
-            .perform(get("/api/v1/carts").header("Authorization", USER))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
-            .andExpect(jsonPath("$.message", notNullValue()))
-            .andExpect(jsonPath("$.timestamp", notNullValue()))
-            .andExpect(jsonPath("$.path", is("/api/v1/carts")))
-            .andExpect(header().string("Content-Type", containsString("application/json")))
-            .andReturn();
+    ResultActions actions = mockMvc.perform(get("/api/v1/carts").header("Authorization", USER));
+    MvcResult result = actions.andReturn();
 
+    // A7 guard FIRST. A problem+json drift also breaks the jsonPath rows below, so behind them this
+    // assertion could never be the one to fail — the drift would surface as a confusing "No value
+    // at JSON path $.error" instead of naming the media type that actually moved.
     String contentType = result.getResponse().getContentType();
     assertFalse(
         contentType != null && contentType.contains("problem"),
         "framework error must not use application/problem+json, was: " + contentType);
+
+    actions
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.error", is("RESOURCE_NOT_FOUND")))
+        .andExpect(jsonPath("$.message", notNullValue()))
+        .andExpect(jsonPath("$.timestamp", notNullValue()))
+        .andExpect(jsonPath("$.path", is("/api/v1/carts")))
+        .andExpect(header().string("Content-Type", containsString("application/json")));
+
     assertNoLeak(result);
   }
 
