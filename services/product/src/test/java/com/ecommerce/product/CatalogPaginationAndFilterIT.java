@@ -86,10 +86,10 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void firstPage_returnsTheTwoLowestActiveIds_andCountsAllFive() throws Exception {
     JsonNode page = getPage("/api/v1/products?page=0&size=2");
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(5);
-    assertThat(page.get("total_pages").intValue()).isEqualTo(3);
-    assertThat(page.get("page").intValue()).isZero();
-    assertThat(page.get("size").intValue()).isEqualTo(2);
+    assertThat(intAt(page, "total_elements")).isEqualTo(5);
+    assertThat(intAt(page, "total_pages")).isEqualTo(3);
+    assertThat(intAt(page, "page")).isZero();
+    assertThat(intAt(page, "size")).isEqualTo(2);
     assertThat(idsOf(page)).containsExactly(activeIds.get(0), activeIds.get(1));
   }
 
@@ -97,15 +97,16 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void lastPage_returnsTheSingleHighestActiveId() throws Exception {
     JsonNode page = getPage("/api/v1/products?page=2&size=2");
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(5);
-    assertThat(page.get("total_pages").intValue()).isEqualTo(3);
+    assertThat(intAt(page, "total_elements")).isEqualTo(5);
+    assertThat(intAt(page, "total_pages")).isEqualTo(3);
     assertThat(idsOf(page)).containsExactly(activeIds.get(4));
   }
 
   // Walking all three pages is what proves the soft-deleted row is excluded from the RESULT SET and
   // not merely pushed off page 0, and that no active row is dropped or duplicated by the paging.
   @Test
-  void everyPageTogether_yieldsTheFiveActiveIdsInOrder_andNeverTheSoftDeletedOne() throws Exception {
+  void everyPageTogether_yieldsTheFiveActiveIdsInOrder_andNeverTheSoftDeletedOne()
+      throws Exception {
     List<Long> seen = new ArrayList<>();
     for (int pageNumber = 0; pageNumber < 3; pageNumber++) {
       seen.addAll(idsOf(getPage("/api/v1/products?page=" + pageNumber + "&size=2")));
@@ -119,8 +120,8 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void categoryFilter_returnsOnlyThatCategory() throws Exception {
     JsonNode page = getPage("/api/v1/products?category=" + ALPHA);
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(3);
-    for (JsonNode element : page.get("content")) {
+    assertThat(intAt(page, "total_elements")).isEqualTo(3);
+    for (JsonNode element : contentOf(page)) {
       assertThat(element.get("category").get("slug").textValue()).isEqualTo(ALPHA);
     }
   }
@@ -132,7 +133,7 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void searchFilter_isCaseInsensitive_andMatchesTwoOfFive() throws Exception {
     JsonNode page = getPage("/api/v1/products?q=ZZQ");
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(2);
+    assertThat(intAt(page, "total_elements")).isEqualTo(2);
     assertThat(namesOf(page)).containsExactly("Alpha Two zzq", "Beta Four zzq");
   }
 
@@ -140,7 +141,7 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void categoryAndSearchCombined_intersectToOne() throws Exception {
     JsonNode page = getPage("/api/v1/products?category=" + ALPHA + "&q=ZZQ");
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(1);
+    assertThat(intAt(page, "total_elements")).isEqualTo(1);
     assertThat(namesOf(page)).containsExactly("Alpha Two zzq");
   }
 
@@ -148,8 +149,8 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void searchFilter_neverReachesTheSoftDeletedRow() throws Exception {
     JsonNode page = getPage("/api/v1/products?q=Deleted");
 
-    assertThat(page.get("total_elements").intValue()).isZero();
-    assertThat(page.get("content")).isEmpty();
+    assertThat(intAt(page, "total_elements")).isZero();
+    assertThat(contentOf(page)).isEmpty();
   }
 
   // An unknown category must narrow to nothing. The failure modes worth naming are the two that a
@@ -158,17 +159,16 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
   void unknownCategory_returns200WithAnEmptyPage_neverTheUnfilteredList() throws Exception {
     JsonNode page = getPage("/api/v1/products?category=nonexistent");
 
-    assertThat(page.get("total_elements").intValue()).isZero();
-    assertThat(page.get("total_pages").intValue()).isZero();
-    assertThat(page.get("content").isArray()).isTrue();
-    assertThat(page.get("content")).isEmpty();
+    assertThat(intAt(page, "total_elements")).isZero();
+    assertThat(intAt(page, "total_pages")).isZero();
+    assertThat(contentOf(page)).isEmpty();
   }
 
   @Test
   void noFilters_returnsAllFiveActive_andNotTheSoftDeletedOne() throws Exception {
     JsonNode page = getPage("/api/v1/products?page=0&size=20");
 
-    assertThat(page.get("total_elements").intValue()).isEqualTo(5);
+    assertThat(intAt(page, "total_elements")).isEqualTo(5);
     assertThat(idsOf(page)).containsExactlyElementsOf(activeIds);
   }
 
@@ -183,15 +183,38 @@ class CatalogPaginationAndFilterIT extends AbstractIntegrationTest {
     return objectMapper.readTree(body);
   }
 
+  /**
+   * Reads a numeric envelope field, failing by NAME when it is absent.
+   *
+   * <p>A casing regression removes {@code total_elements} rather than changing its value, so a bare
+   * {@code intAt(page, "total_elements")} dies with a NullPointerException that names neither the
+   * field nor the cause. The pin has to say which key vanished.
+   */
+  private int intAt(JsonNode page, String field) {
+    JsonNode value = page.get(field);
+    assertThat(value).as("envelope key %s is absent from %s", field, page).isNotNull();
+    assertThat(value.isNumber())
+        .as("envelope key %s must be a number, was %s", field, value)
+        .isTrue();
+    return value.intValue();
+  }
+
+  private JsonNode contentOf(JsonNode page) {
+    JsonNode content = page.get("content");
+    assertThat(content).as("envelope key content is absent from %s", page).isNotNull();
+    assertThat(content.isArray()).as("content must be an array, was %s", content).isTrue();
+    return content;
+  }
+
   private List<Long> idsOf(JsonNode page) {
     List<Long> ids = new ArrayList<>();
-    page.get("content").forEach(element -> ids.add(element.get("id").longValue()));
+    contentOf(page).forEach(element -> ids.add(element.get("id").longValue()));
     return ids;
   }
 
   private List<String> namesOf(JsonNode page) {
     List<String> names = new ArrayList<>();
-    page.get("content").forEach(element -> names.add(element.get("name").textValue()));
+    contentOf(page).forEach(element -> names.add(element.get("name").textValue()));
     return names;
   }
 

@@ -14,9 +14,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * The permit side of the security chain, and the exact bytes the probe endpoints disclose.
  *
  * <p>Two independent regressions are pinned here. Losing a permit matcher turns the K8s probes into
- * 401s against a chain that terminates in {@code denyAll()} — a runtime outage, not a compile error.
- * Turning health details on turns these bodies into a component inventory (driver class, validation
- * query, disk paths) served unauthenticated to anything on the pod network.
+ * 401s against a chain that terminates in {@code denyAll()} — a runtime outage, not a compile
+ * error. Turning health details on turns these bodies into a component inventory (driver class,
+ * validation query, disk paths) served unauthenticated to anything on the pod network.
  *
  * <p>Bodies are asserted <b>byte-for-byte</b>, never by {@code $.status} alone: a subset assertion
  * passes unchanged when {@code components} appears next to {@code status}, which is precisely the
