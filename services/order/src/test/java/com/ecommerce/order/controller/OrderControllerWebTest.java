@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -96,6 +97,7 @@ class OrderControllerWebTest {
     mockMvc
         .perform(post("/api/v1/orders").header("Idempotency-Key", "k1"))
         .andExpect(status().isUnauthorized())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
     verifyNoInteractions(orderService);
   }
@@ -117,6 +119,7 @@ class OrderControllerWebTest {
     mockMvc
         .perform(post("/api/v1/orders").header("Authorization", USER))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("IDEMPOTENCY_KEY_REQUIRED"));
     verifyNoInteractions(orderService);
   }
@@ -129,6 +132,7 @@ class OrderControllerWebTest {
         .perform(
             post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", "k1"))
         .andExpect(status().isCreated())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(header().string("Location", "/api/v1/orders/" + ORDER_ID))
         .andExpect(jsonPath("$.id").value(ORDER_ID.toString()))
         .andExpect(jsonPath("$.status").value("PENDING"))
@@ -144,6 +148,7 @@ class OrderControllerWebTest {
         .perform(
             post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", "k1"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(header().doesNotExist("Location"))
         .andExpect(jsonPath("$.id").value(ORDER_ID.toString()));
   }
@@ -156,6 +161,7 @@ class OrderControllerWebTest {
         .perform(
             post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", "k1"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("EMPTY_CART"));
   }
 
@@ -167,6 +173,7 @@ class OrderControllerWebTest {
         .perform(
             post("/api/v1/orders").header("Authorization", USER).header("Idempotency-Key", "k1"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("INSUFFICIENT_STOCK"))
         .andExpect(jsonPath("$.product_id").value(42));
   }
@@ -179,6 +186,7 @@ class OrderControllerWebTest {
     mockMvc
         .perform(get("/api/v1/orders/" + ORDER_ID).header("Authorization", USER))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("ORDER_NOT_FOUND"));
   }
 
@@ -195,6 +203,7 @@ class OrderControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isOk())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.status").value("CANCELLED"));
   }
 
@@ -209,6 +218,7 @@ class OrderControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"CANCELLED\"}"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("ORDER_NOT_CANCELLABLE"));
   }
 
@@ -221,6 +231,7 @@ class OrderControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"PENDING\"}"))
         .andExpect(status().isBadRequest())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("UNSUPPORTED_STATUS_TRANSITION"));
     verifyNoInteractions(orderService);
   }
