@@ -23,6 +23,27 @@ FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 
+# CVE-2026-14456 (HIGH): OpenSSL DoS via unbounded memory growth in the QUIC server,
+# fixed in 3.5.7-1~deb13u2. Upgraded in place rather than by moving to a newer base
+# tag: as of 2026-08-27 python:3.12-slim still resolves to the digest carrying the
+# vulnerable 3.5.6-1~deb13u2, so there is no fixed tag to move to; trixie-security
+# (already in the base's sources) does carry the fix.
+# This must live in the RUNTIME stage — it is the stage that gets scanned and shipped.
+# Scoped to the three packages the scan names (all built from the openssl source
+# package) instead of a blanket `apt-get upgrade`, to keep the layer small.
+# The version assertion turns a silently skipped upgrade (`--only-upgrade` is a no-op
+# for a package it cannot find) into a failed build instead of a red scan later.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade \
+        openssl \
+        libssl3t64 \
+        openssl-provider-legacy \
+    && rm -rf /var/lib/apt/lists/* \
+    && for pkg in openssl libssl3t64 openssl-provider-legacy; do \
+           dpkg --compare-versions "$(dpkg-query -W -f='${Version}' "$pkg")" ge 3.5.7-1~deb13u2 \
+           || { echo "FATAL: $pkg is older than 3.5.7-1~deb13u2 (CVE-2026-14456)" >&2; exit 1; }; \
+       done
+
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
