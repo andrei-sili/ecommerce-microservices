@@ -2,6 +2,7 @@ package com.ecommerce.payment;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -161,13 +162,20 @@ class Rs256OnlyNoSecretValidationIntegrationTest {
    */
   @Test
   void shippedConfigBindsNoLegacySecret() {
-    assertNull(
-        jwtProperties.secret(),
-        "the shipped application.yml must bind no legacy HS256 secret (phase-3 posture, D3)");
-    assertEquals(
-        List.of("RS256"),
-        jwtProperties.acceptedAlgs(),
-        "the shipped JWT_ACCEPTED_ALGS default must stay RS256-only");
+    // assertAll, not two bare statements: the halves are independent regressions and a simultaneous
+    // double regression must report BOTH. A bare assertNull would dominate the allowlist assertion
+    // and make it unfalsifiable by position (contract 4h(2)) - the exact defect this wave exists to
+    // remove, so it must not be reintroduced on the money service's security-posture pin.
+    assertAll(
+        () ->
+            assertNull(
+                jwtProperties.secret(),
+                "the shipped application.yml must bind no legacy HS256 secret (phase-3 posture, D3)"),
+        () ->
+            assertEquals(
+                List.of("RS256"),
+                jwtProperties.acceptedAlgs(),
+                "the shipped JWT_ACCEPTED_ALGS default must stay RS256-only"));
   }
 
   private UUID seedPayment(long userId) {
