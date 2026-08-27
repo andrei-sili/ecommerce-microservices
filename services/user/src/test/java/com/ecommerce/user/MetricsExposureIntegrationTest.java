@@ -12,7 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -21,16 +20,22 @@ import org.springframework.test.web.servlet.MockMvc;
  * and the metrics endpoint stays outside the {@code /api/v1} business namespace. Runs against the
  * real security chain + dispatcher + Postgres.
  *
- * <p>Two test-context adjustments reproduce production behaviour that the shared test config
- * suppresses: {@code @AutoConfigureObservability} restores metrics export (Spring Boot's test
- * customizer otherwise forces {@code management.defaults.metrics.export.enabled=false}, hiding the
- * endpoint), and {@code @TestPropertySource} restores the production exposure list ({@code
- * src/test/resources/application.yml} shadows the main file, which defaults exposure to {@code
- * health} only). The security {@code permitAll} rule under test is exercised unchanged.
+ * <p>{@code @AutoConfigureObservability} is required and stays: Spring Boot's test customizer
+ * otherwise forces {@code management.defaults.metrics.export.enabled=false} and the endpoint
+ * disappears. That is a test-harness default being switched off, not a production value being
+ * replayed.
+ *
+ * <p>The exposure list is a production value and is therefore <strong>not</strong> replayed here
+ * any more. Until the S-shadow slice this class carried {@code @TestPropertySource(properties =
+ * "management.endpoints.web.exposure.include=health,info,prometheus")}, because {@code
+ * src/test/resources/application.yml} shadowed the shipped file and left exposure at Boot's {@code
+ * health}-only default. That hand-replay made the class blind to the drift it should catch:
+ * dropping {@code prometheus} from the SHIPPED exposure list would have left it green. The exposure
+ * list now comes from {@code src/main/resources/application.yml}, so that mutation turns the first
+ * row below red. Do not reintroduce a {@code management.endpoints.*} property here.
  */
 @AutoConfigureMockMvc
 @AutoConfigureObservability
-@TestPropertySource(properties = "management.endpoints.web.exposure.include=health,info,prometheus")
 class MetricsExposureIntegrationTest extends AbstractIntegrationTest {
 
   private static final String METRICS_PATH = "/actuator/prometheus";

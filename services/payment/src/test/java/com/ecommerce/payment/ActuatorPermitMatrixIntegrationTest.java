@@ -10,7 +10,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -23,16 +22,16 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>Runs against BOTH real dependencies (Postgres and RabbitMQ via Testcontainers) rather than the
  * mocked-relay base: {@code /actuator/health} aggregates the {@code rabbit} indicator too, so
  * without a broker the endpoint answers 503 for reasons that have nothing to do with the permit
- * being pinned. The production exposure list and probe settings are mirrored here because the
- * shared test yml keeps actuator defaults — the same technique {@code
- * MetricsEndpointIntegrationTest} uses.
+ * being pinned.
+ *
+ * <p><b>The exposure list and probe settings are NOT re-declared here.</b> They used to be, in a
+ * {@code @TestPropertySource} that mirrored production "because the shared test yml keeps actuator
+ * defaults" — which made this class assert a configuration it supplied itself (contract F5 names
+ * payment as one of three services that could not detect an exposure widening in-suite for exactly
+ * that reason). They now come from the shipped {@code application.yml} through the {@code test}
+ * profile overlay, so dropping {@code info} from {@code exposure.include} there, or turning {@code
+ * probes.enabled} off, turns this class RED.
  */
-@TestPropertySource(
-    properties = {
-      "management.endpoints.web.exposure.include=health,info,prometheus",
-      "management.endpoint.health.probes.enabled=true",
-      "management.endpoint.health.group.readiness.include=readinessState,db"
-    })
 class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest {
 
   /**

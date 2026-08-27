@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.TestPropertySource;
 
 /**
  * Pins what only a real servlet container can show: the {@code Content-Type} bytes that actually go
@@ -56,12 +55,6 @@ import org.springframework.test.context.TestPropertySource;
  * file is the only durable home for the measurement and its caveat.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = {
-      "management.endpoints.web.exposure.include=health,info,prometheus",
-      "management.endpoint.health.probes.enabled=true",
-      "management.endpoint.health.group.readiness.include=readinessState,db"
-    })
 class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
 
   /** Measured: the hand-written entry point, which writes to {@code getOutputStream()}. */
@@ -126,6 +119,12 @@ class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
    * correction to the contract's F1 row (the root aggregate carries {@code groups} and is 49 bytes,
    * not the 15-byte body F1 originally claimed), and that correction rested on MockMvc alone until
    * this row. Same shipped management values, real Tomcat, raw client: same bytes.
+   *
+   * <p>"Shipped" became literally true only in the S-shadow slice. This class used to replay the
+   * three {@code management.*} keys through a {@code @TestPropertySource}, because the test tree's
+   * {@code application.yml} shadowed the shipped file — so the sentence above described an intent
+   * the code did not implement. The values now come from {@code
+   * src/main/resources/application.yml}; do not reintroduce the replay.
    */
   @Test
   void shippedActuatorBodies_onRealTomcat_matchTheMockMvcPins() throws Exception {
