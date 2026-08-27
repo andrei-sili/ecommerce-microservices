@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.user.config.JwtProperties;
 import com.ecommerce.user.model.RefreshToken;
 import com.ecommerce.user.model.User;
 import com.ecommerce.user.repository.OutboxEventRepository;
@@ -51,6 +52,7 @@ class RefreshContinuityIntegrationTest extends AbstractIntegrationTest {
   @Autowired private OutboxEventRepository outboxEventRepository;
   @Autowired private TokenHasher tokenHasher;
   @Autowired private PasswordEncoder passwordEncoder;
+  @Autowired private JwtProperties jwtProperties;
 
   @DynamicPropertySource
   static void flipSignerToRs256(DynamicPropertyRegistry registry) {
@@ -106,6 +108,28 @@ class RefreshContinuityIntegrationTest extends AbstractIntegrationTest {
     // Rotation still happens: the pre-flip refresh token is replaced (no session loss, but
     // rotated).
     assertNotEquals(preFlipRefresh, body.get("refresh_token").asText());
+  }
+
+  /**
+   * Pins the shipped REFRESH-token lifetime, which nothing else in the suite binds.
+   *
+   * <p>Asymmetry worth stating rather than hiding: the access-token TTL is pinned
+   * <em>behaviourally</em> in three places ({@code $.expires_in} is 900 above, and in {@code
+   * AuthFlowIntegrationTest} and {@code Rs256SigningIntegrationTest}), because a login response
+   * carries it. A refresh token is an opaque SHA-256 row whose lifetime appears in no response
+   * body, so the only available pin is the bound property. That makes this a weaker pin than its
+   * access-token counterpart — it proves the shipped default still binds, not that the persisted
+   * row honours it — and it exists so a silent change to the shipped session lifetime cannot pass
+   * green. Before the S-shadow slice neither TTL was pinned against the shipped file at all: the
+   * test yml re-declared both, so the suite asserted values it had handed itself.
+   */
+  @Test
+  void shippedRefreshTokenTtl_isBoundFromTheShippedFile() {
+    assertEquals(
+        604800,
+        jwtProperties.refreshTokenTtlSeconds(),
+        "security.jwt.refresh-token-ttl-seconds must still bind from the shipped application.yml"
+            + " (${JWT_REFRESH_TTL_SECONDS:604800}) — it is the session lifetime");
   }
 
   private JsonNode decodeHeader(String token) throws Exception {

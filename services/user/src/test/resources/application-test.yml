@@ -1,0 +1,42 @@
+# Test overlay for the `test` profile, activated by AbstractIntegrationTest's @ActiveProfiles.
+#
+# This is an OVERLAY on src/main/resources/application.yml, not a replacement. Until the S-shadow
+# slice this file was named application.yml and therefore SHADOWED the shipped one entirely
+# (target/test-classes precedes target/classes on the test classpath, and Boot resolves
+# classpath:/application.yml to the FIRST match), so the suite validated a configuration it handed
+# itself. Measured at 1078cad, before the refactor: deleting `default-property-inclusion` and
+# flipping `property-naming-strategy` to LOWER_CAMEL_CASE in the SHIPPED file left all 124 tests
+# green. After it: JacksonBindingIntegrationTest goes red and names the property.
+#
+# RULE FOR ANYONE EDITING THIS FILE: only keys tests genuinely need DIFFERENT belong here. Never
+# re-declare a key the shipped file already sets to the value under test — a copy here makes every
+# pin on that key blind to shipped-file drift, which is exactly the defect this slice removed.
+# Deliberately absent, and to stay absent:
+#   * spring.jackson.*  — the wire contract under test (B9); must come from the shipped file.
+#   * management.*      — exposure, probes and the readiness group; ActuatorPermitMatrixIntegrationTest
+#                         and MetricsExposureIntegrationTest assert what production actually ships.
+#   * spring.datasource.*, security.jwt.private-key-path, security.jwt.public-keys — supplied per
+#                         context by @DynamicPropertySource (Testcontainers / generated RSA keys),
+#                         which outranks both ymls, so the shipped placeholders stay unevaluated.
+#   * admin.bootstrap.*   — pinned empty in AbstractIntegrationTest#adminBootstrapStaysDisabled, NOT
+#                         here. A yml pin cannot hold: OS env outranks profile yml, and
+#                         ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD bind straight to these keys.
+#                         Measured — the yml version let a test run seed a real ADMIN account.
+#   * spring.jpa.*, spring.flyway.* — tests now run the shipped values. Note this is NOT a no-op:
+#                         the shipped file declares two keys the old shadow omitted, and test
+#                         contexts inherit both by design — `spring.jpa.properties.hibernate.jdbc
+#                         .time_zone: UTC` (closes contract D13's gap: user's test config had no UTC
+#                         pin) and `spring.flyway.baseline-on-migrate: false`.
+
+security:
+  jwt:
+    # The shipped file has NO secret: phase 3 deleted it so production is fail-closed on RS256.
+    # The HS256 half of the dual-accept matrix still has to be exercised, so tests supply their own.
+    secret: test-jwt-secret-that-is-at-least-32-bytes-long-0123456789 # gitleaks:allow
+    # Tests mint tokens with issuer `user-service-test` (JwtTestKeys), distinct from the shipped
+    # `user-service` so a test token can never be mistaken for one minted by a real environment.
+    issuer: user-service-test
+    # Shipped defaults are RS256 / RS256. The dual-accept suites need HS256 reachable as the
+    # baseline posture; the RS256-only classes narrow `accepted-algs` back per context.
+    signing-alg: HS256
+    accepted-algs: HS256,RS256
