@@ -24,6 +24,7 @@ import com.ecommerce.order.security.RestAccessDeniedHandler;
 import com.ecommerce.order.security.RestAuthenticationEntryPoint;
 import com.ecommerce.order.service.OrderService;
 import com.ecommerce.order.service.OrderService.PlacementResult;
+import com.ecommerce.order.support.JwtTestKeys;
 import com.ecommerce.order.support.TestJwt;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -39,6 +40,9 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -55,11 +59,24 @@ import org.springframework.test.web.servlet.MockMvc;
   OrderControllerWebTest.MeterRegistryConfig.class
 })
 @EnableConfigurationProperties(com.ecommerce.order.config.JwtProperties.class)
-// HS256-only here (this slice tests the controller, not the RS256 matrix) so no public key is
-// required to boot JwtService; the full dual-accept matrix lives in the security integration tests.
+// HS256-only here (this slice tests the controller, not the RS256 matrix) so no RS256 branch is
+// exercised; the full dual-accept matrix lives in the security integration tests.
 @TestPropertySource(
     properties = {"security.jwt.secret=" + TestJwt.SECRET, "security.jwt.accepted-algs=HS256"})
+@ActiveProfiles("test")
 class OrderControllerWebTest {
+
+  /**
+   * The shipped {@code application.yml} — read for real now that the test config is a profile
+   * overlay rather than a shadow — declares {@code security.jwt.public-keys.user-rs256-2026-07:
+   * ${JWT_PUBLIC_KEY_PATH}}. {@code JwtProperties} is bound in this slice, and {@code JwtService}
+   * loads every configured PEM regardless of the allowlist, so the placeholder must resolve to a
+   * real key file even on this HS256-only context.
+   */
+  @DynamicPropertySource
+  static void shippedPublicKeyPath(DynamicPropertyRegistry registry) {
+    registry.add("JWT_PUBLIC_KEY_PATH", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
+  }
 
   @TestConfiguration
   static class MeterRegistryConfig {
