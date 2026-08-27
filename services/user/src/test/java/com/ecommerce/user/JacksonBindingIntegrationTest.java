@@ -22,12 +22,19 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
  * once, in a cascade of unrelated-looking body mismatches, and the actual cause — one property that
  * stopped binding — would have to be reconstructed from them. This class fails first and names it.
  *
- * <p>Scope limit, stated rather than papered over: {@code user}'s {@code
- * src/test/resources/application.yml} fully shadows the shipped file, and carries its own copy of
- * the same jackson block. So a green here proves the property still binds — the migration risk this
- * pin exists for — but says nothing about the SHIPPED yml being the file that supplied it. Closing
- * that half is the shadow slice's job (contract §6.9, §10); it is deliberately not worked around
- * here, because asserting against the test yml would make the pin blinder, not better.
+ * <p><strong>The scope limit this class used to carry is closed.</strong> Until the S-shadow slice,
+ * {@code user}'s {@code src/test/resources/application.yml} fully shadowed the shipped file and
+ * carried its own copy of the same jackson block, so a green here proved only that the property
+ * still binds — never that the SHIPPED yml was the file that supplied it. The test config is now a
+ * profile overlay ({@code application-test.yml}) that deliberately declares no {@code
+ * spring.jackson.*} key, so these three assertions read {@code src/main/resources/application.yml}.
+ *
+ * <p>Verified rather than assumed, at {@code f766efd}: deleting {@code default-property-inclusion}
+ * and flipping {@code property-naming-strategy} to {@code LOWER_CAMEL_CASE} in the SHIPPED file
+ * turns all three rows below red and names the property in each message. The same mutation on the
+ * pre-refactor tree left the whole suite green. <strong>Never re-declare {@code spring.jackson.*}
+ * in the test overlay</strong> — that single line is what made this pin vacuous for the whole of
+ * its previous life.
  */
 @AutoConfigureMockMvc
 class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
