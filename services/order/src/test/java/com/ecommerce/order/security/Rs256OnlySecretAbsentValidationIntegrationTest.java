@@ -2,12 +2,16 @@ package com.ecommerce.order.security;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.order.config.JwtProperties;
 import com.ecommerce.order.support.JwtTestKeys;
+import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,9 +37,20 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * com.ecommerce.order.config.JwtProperties} by hand with no Spring context at all — both prove the
  * MECHANISM, neither proves the SHIPPED VALUE.
  *
- * <p>Coupled to both phase-3 edits at once: if the shipped default regressed to a dual allowlist,
- * {@code loadHmacKey} would demand the now-absent secret and the context would fail to start; if a
- * shipped {@code secret:} were resurrected, this would stop exercising the deployed shape.
+ * <p>The two phase-3 edits are detected by DIFFERENT rows, and the difference is measured, not
+ * assumed:
+ *
+ * <ul>
+ *   <li><b>Allowlist re-widened</b> (shipped default gains HS256) → {@code loadHmacKey} demands the
+ *       now-absent secret and the CONTEXT FAILS TO START. A startup red, not an assertion red —
+ *       stated plainly because that is what it is; the cause names the posture: {@code
+ *       IllegalStateException: JWT_SECRET must be at least 32 bytes for HS256 (required because
+ *       HS256 is in JWT_ACCEPTED_ALGS)}.
+ *   <li><b>Secret resurrected</b> (a {@code secret:} inserted into the shipped yaml) → the two HTTP
+ *       rows below stay GREEN, measured: with HS256 off the allowlist the secret is never read.
+ *       Only {@link #shippedJwtProperties_haveNoSecret_andRs256OnlyAllowlist()} catches it. Do not
+ *       delete that row on the grounds that the HTTP rows "already cover" the posture.
+ * </ul>
  *
  * <p>Order-specific boot needs, registered because the shipped yaml binds them with no default —
  * without these the context dies before either assertion runs, which would turn a posture failure
@@ -67,14 +82,48 @@ class Rs256OnlySecretAbsentValidationIntegrationTest {
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
+    // The SHIPPED yaml binds exactly five placeholders with no default; all five are below.
+    // Enumerated from the file rather than discovered one context failure at a time:
+    //   grep -nE '\$\{[A-Z_]+\}' src/main/resources/application.yml
     registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("JWT_PUBLIC_KEY_PATH", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
     registry.add("INTERNAL_API_KEY", () -> "test-internal-api-key");
+
+    // Dropping @ActiveProfiles also drops the overlay's scheduling/listener switches, and the
+    // shipped defaults turn both back ON: SchedulingConfig is @ConditionalOnProperty with
+    // matchIfMissing=true, so OutboxRelay's @Scheduled fires every second, and listener containers
+    // auto-start — both against the compose hostname `rabbitmq`, unresolvable here. Not a guess:
+    // before these two lines the run logged `Attempting to connect to: [rabbitmq:5672]` and
+    // `java.net.UnknownHostException: rabbitmq`. Only the JWT posture is under test here, and no
+    // assertion in this class depends on the shipped value of either key.
+    registry.add("app.scheduling.enabled", () -> "false");
+    registry.add("spring.rabbitmq.listener.simple.auto-startup", () -> "false");
   }
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private JwtProperties jwtProperties;
+
+  /**
+   * The bean-level half. Without it the "secret is absent" claim is UNFALSIFIABLE: measured on this
+   * very class, inserting a {@code secret:} into the shipped yaml leaves both HTTP rows green
+   * (140/140 passed), because with HS256 off the allowlist {@code loadHmacKey} returns before
+   * reading it. So the HTTP rows pin the ALLOWLIST; this row is the only thing that pins the
+   * SECRET'S ABSENCE.
+   */
+  @Test
+  void shippedJwtProperties_haveNoSecret_andRs256OnlyAllowlist() {
+    assertNull(
+        jwtProperties.secret(),
+        "the shipped application.yml must bind NO security.jwt.secret — phase-3 deleted it"
+            + " (fail-closed, D3); a resurrected secret is invisible to every HTTP assertion in"
+            + " this class");
+    assertEquals(
+        List.of("RS256"),
+        jwtProperties.acceptedAlgs(),
+        "the shipped allowlist must remain RS256-only");
+  }
 
   @Test
   void rs256Token_accepted_whenSecretPropertyAbsent() throws Exception {
