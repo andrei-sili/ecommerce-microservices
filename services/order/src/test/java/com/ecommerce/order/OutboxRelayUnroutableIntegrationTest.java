@@ -75,8 +75,11 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     // Let RabbitAdmin declare Order's own topology (the ecommerce.events exchange) at startup.
     registry.add("spring.rabbitmq.dynamic", () -> "true");
     // NB: publisher-confirm-type=correlated + publisher-returns=true are intentionally NOT set
-    // here — they are sourced from application.yml (mirroring production), so reverting them there
-    // turns this test RED. Only container-specific wiring is overridden above.
+    // here — they are sourced from the SHIPPED src/main/resources/application.yml, so deleting
+    // either one THERE turns this test RED. That guarantee was false until the test config became
+    // a profile overlay: src/test/resources/application.yml re-declared both, so the shipped file
+    // could be emptied with the suite still green. Do not restore either key to the overlay.
+    // Only container-specific wiring is overridden above.
   }
 
   @Autowired private OutboxRelay outboxRelay;
