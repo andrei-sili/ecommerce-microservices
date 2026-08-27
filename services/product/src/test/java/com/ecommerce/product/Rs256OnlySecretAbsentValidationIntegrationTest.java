@@ -2,10 +2,12 @@ package com.ecommerce.product;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.product.config.JwtProperties;
 import com.ecommerce.product.model.Category;
 import com.ecommerce.product.repository.CategoryRepository;
 import com.ecommerce.product.repository.ProductRepository;
@@ -28,13 +30,20 @@ import org.testcontainers.containers.PostgreSQLContainer;
  *
  * <p>Every other dual-accept suite injects a test secret via {@link
  * com.ecommerce.product.support.AbstractIntegrationTest}, so none of them proves the secret can be
- * missing. This standalone boot deliberately registers no secret ({@code JwtProperties.secret}
- * binds {@code null}) and no {@code accepted-algs} override, coupling the test to BOTH phase-3
- * edits: if the yaml default regressed to a dual allowlist, {@code loadHmacKey} would demand the
- * now-absent secret and the context would fail to start; if the secret binding were resurrected,
- * this would no longer exercise the deployed shape. A valid RS256 token is still accepted (ADMIN
- * write returns 201) and a fresh HS256 forgery is rejected with the pinned 401 envelope (HS256 is
- * off at the allowlist, so the missing secret is irrelevant to the rejection).
+ * missing. This standalone boot deliberately registers no secret and no {@code accepted-algs}
+ * override, coupling the test to BOTH phase-3 edits: if the yaml default regressed to a dual
+ * allowlist, {@code loadHmacKey} would demand the now-absent secret and the context would fail to
+ * start.
+ *
+ * <p><b>Which row carries which claim — read this before trusting the headline.</b> The absence of
+ * the secret is asserted by exactly ONE row, {@link
+ * #secretProperty_bindsNull_provingTheShippedYamlCarriesNoSecret()}. The two request rows cannot
+ * see a resurrected {@code secret:} and must not be read as evidence for it: the RS256 row passes
+ * regardless, because RS256 validation never consults the secret; and the HS256 forgery is rejected
+ * at the ALLOWLIST — {@code loadHmacKey} returns {@code null} early when HS256 is off — so it would
+ * still return 401 with a secret fully bound. Measured, not reasoned: resurrecting a shipped {@code
+ * secret:} reddens the binding row alone and leaves both request rows green. Deleting the binding
+ * row therefore does not weaken this class's coverage, it removes it entirely.
  *
  * <p>Unlike cart's twin, product's shipped yaml binds {@code security.internal-api-key} with no
  * default, so it is registered here too — otherwise {@code SecurityConfig} fails the context at
@@ -76,6 +85,7 @@ class Rs256OnlySecretAbsentValidationIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private CategoryRepository categoryRepository;
   @Autowired private ProductRepository productRepository;
+  @Autowired private JwtProperties jwtProperties;
 
   private long categoryId;
 
@@ -84,6 +94,25 @@ class Rs256OnlySecretAbsentValidationIntegrationTest {
     productRepository.deleteAll();
     categoryRepository.deleteAll();
     categoryId = categoryRepository.save(new Category("Apparel", "apparel")).getId();
+  }
+
+  /**
+   * The class's headline claim, and the only row that can detect its violation.
+   *
+   * <p>{@code security.jwt.secret} is absent from the shipped {@code application.yml} (phase-3
+   * fail-closed posture, D3: re-widening needs a git revert plus a NEW secret, never a live env
+   * toggle) and this standalone context registers none, so the binding is {@code null}. Nothing
+   * else in the suite asserts this: a resurrected {@code secret:} is inert at runtime while HS256
+   * is off the allowlist — {@code JwtService.loadHmacKey} returns early without reading it — so it
+   * changes no status code, no envelope and no startup outcome. That inertness is exactly why the
+   * property needs a direct assertion rather than a behavioural one.
+   */
+  @Test
+  void secretProperty_bindsNull_provingTheShippedYamlCarriesNoSecret() {
+    assertNull(
+        jwtProperties.secret(),
+        "security.jwt.secret must bind null: the shipped application.yml carries no secret: key"
+            + " (phase-3 fail-closed posture) and this context registers none");
   }
 
   @Test
