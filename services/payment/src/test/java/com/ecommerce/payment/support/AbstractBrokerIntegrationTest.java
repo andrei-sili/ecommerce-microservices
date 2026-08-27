@@ -14,9 +14,11 @@ import org.testcontainers.utility.DockerImageName;
  * — they drive the real relay against the real broker and assert row state + delivery.
  *
  * <p>{@code publisher-confirm-type: correlated} + {@code publisher-returns: true} are sourced from
- * the test {@code application.yml} (mirroring production), so reverting either one there turns the
- * seam tests RED. Only container wiring and {@code dynamic=true} (so RabbitAdmin declares the
- * exchange) are overridden here.
+ * the SHIPPED {@code application.yml} — the test overlay deliberately does not repeat them, so
+ * deleting either one from production config turns the seam tests RED (C5). They used to be
+ * mirrored in the test yml, which meant the seam tests protected a copy rather than the shipped
+ * setting. Only container wiring and {@code dynamic=true} (so RabbitAdmin declares the exchange)
+ * are overridden here.
  */
 public abstract class AbstractBrokerIntegrationTest extends AbstractIntegrationTest {
 
@@ -48,7 +50,7 @@ public abstract class AbstractBrokerIntegrationTest extends AbstractIntegrationT
     registry.add("spring.rabbitmq.port", RABBIT::getAmqpPort);
     registry.add("spring.rabbitmq.username", RABBIT::getAdminUsername);
     registry.add("spring.rabbitmq.password", RABBIT::getAdminPassword);
-    // Re-enable RabbitAdmin (test yml sets dynamic=false) so it declares ecommerce.events.
+    // Re-enable RabbitAdmin (the test overlay sets dynamic=false) so it declares ecommerce.events.
     registry.add("spring.rabbitmq.dynamic", () -> "true");
   }
 
