@@ -1,0 +1,66 @@
+# Test profile OVERLAY - activated by @ActiveProfiles("test") on the context roots.
+#
+# This file used to be src/test/resources/application.yml, which SHADOWED the shipped
+# src/main/resources/application.yml entirely: `classpath:/application.yml` resolves to the first
+# match on the classpath and target/test-classes precedes target/classes. Every serialization
+# assertion in this suite therefore validated a configuration the suite handed itself. Mutation M2
+# settled it - emptying the SHIPPED file (dropping `default-property-inclusion`, flipping
+# `property-naming-strategy` to LOWER_CAMEL_CASE) left all 106 tests green.
+#
+# As a profile-specific file it now LAYERS ON TOP of the shipped one instead of replacing it, so
+# the shipped file is the single source for everything not listed below - in particular
+# `spring.jackson.*`, `spring.jpa.*`, `spring.flyway.*` and `spring.rabbitmq.publisher-*`, which
+# are deliberately ABSENT here. Do not re-add a key just because production also sets it: a key
+# present in both files is a key this suite can no longer falsify.
+#
+# Only genuinely test-specific values belong here.
+spring:
+  # RabbitMQ: localhost during tests. Business tests @MockitoBean OutboxRelay so no connection opens;
+  # the non-mocked broker seam tests (OutboxRelay*IntegrationTest) point these at a Testcontainers
+  # broker via @DynamicPropertySource and flip `dynamic` back on.
+  #
+  # `publisher-confirm-type` / `publisher-returns` are NOT repeated here on purpose - the relay's
+  # "broker confirm != routable" logic reads them from the SHIPPED file now, so deleting either one
+  # THERE turns the seam tests RED.
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    # No RabbitAdmin connecting/declaring topology at startup for the mocked-relay tests.
+    dynamic: false
+
+server:
+  port: 0
+
+security:
+  jwt:
+    # The legacy HS256 secret + the RS256 public keys are wired per-context from JwtTestKeys via
+    # @DynamicPropertySource (AbstractIntegrationTest) - a single source, never a duplicated literal.
+    # Only the validator allowlist default lives here; the contraction suites override it. The
+    # shipped file ships RS256-only (phase 3); the suite needs both to exercise the HS256 rejection
+    # paths, so this is a genuine test-only difference.
+    accepted-algs: HS256,RS256
+  webhook:
+    secret: test-webhook-secret
+
+clients:
+  order:
+    base-url: http://order-service.test
+
+payment:
+  gateway:
+    api-key: sandbox-test-key
+
+outbox:
+  relay:
+    batch-size: 10
+    # Well above any test's runtime: the scheduler must never fire on its own even if a context
+    # re-enables scheduling. Seam tests call OutboxRelay.drain() directly.
+    fixed-delay-ms: 60000
+
+# Keeps @EnableScheduling (SchedulingConfig) off during tests so the relay never auto-fires; the
+# broker seam tests call OutboxRelay.drain() directly for deterministic red->green assertions.
+app:
+  scheduling:
+    enabled: false

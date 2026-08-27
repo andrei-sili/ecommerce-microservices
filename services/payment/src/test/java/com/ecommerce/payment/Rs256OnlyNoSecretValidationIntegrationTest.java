@@ -27,6 +27,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -47,6 +48,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@ActiveProfiles("test")
 class Rs256OnlyNoSecretValidationIntegrationTest {
 
   private static final String BASE = "/api/v1/payments";
@@ -69,7 +71,8 @@ class Rs256OnlyNoSecretValidationIntegrationTest {
   /**
    * The exact prod property shape: RS256-only allowlist and the RS256 public key, but deliberately
    * NO {@code security.jwt.secret} — the absence phase 3 ships. The RabbitMQ/scheduling defaults
-   * come from {@code src/test/resources/application.yml}.
+   * come from the {@code test} profile overlay ({@code application-test.yml}); everything else,
+   * serialization included, comes from the SHIPPED {@code application.yml}.
    */
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) {
