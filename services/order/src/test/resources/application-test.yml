@@ -8,12 +8,26 @@
 # catch. As a profile overlay the shipped file is loaded first and only the keys below are
 # overridden.
 #
-# THE RULE THAT KEEPS THAT FIXED: nothing here may re-declare a key that production also declares.
-# `spring.jackson.*`, `spring.rabbitmq.publisher-confirm-type` / `publisher-returns`,
-# `acknowledge-mode`, `spring.jpa.*`, `spring.flyway.*` and the whole `management` block were all
-# duplicated here and are deliberately gone — they now come from the shipped file, which is what
-# makes a mutation of that file able to turn this suite RED. Anything added back below re-blinds the
-# suite to that key. Only genuine test needs belong here.
+# THE RULE THAT KEEPS THAT FIXED: nothing here may re-declare a key whose SHIPPED VALUE an assertion
+# depends on. Re-declaring such a key does not just duplicate it — it makes the suite unable to see
+# that key change in production. Keys below like `server.port`, `spring.rabbitmq.*` host/port and the
+# client base-urls are re-declared on purpose: they are wiring no assertion reads a shipped value
+# from. (`clients.product.internal-api-key` is forced — the shipped file binds `${INTERNAL_API_KEY}`
+# with no default, so a context without it fails to boot.)
+#
+# The enumerated form of the rule — these are gone and must NOT come back:
+#   spring.jackson.*                                     (M2 / casing + inclusion pins)
+#   management.*                                         (actuator exposure, probes, readiness group)
+#   spring.rabbitmq.publisher-confirm-type / publisher-returns   (C5 "confirm != routable")
+#   spring.rabbitmq.listener.simple.acknowledge-mode
+#   spring.jpa.* / spring.flyway.*
+# Adding any of them back re-blinds the suite to that key, silently and with a green build.
+#
+# One deliberate exception remains, and it is pinned elsewhere rather than waived: `security.jwt`
+# `secret` + `accepted-algs` below DO diverge from the shipped posture, because the dual-accept
+# matrix needs both algorithm branches live. The shipped posture (RS256-only, no secret at all) is
+# covered by Rs256OnlySecretAbsentValidationIntegrationTest, which deliberately does not activate
+# this profile and so reads the shipped file alone.
 spring:
   datasource:
     hikari:
