@@ -4,15 +4,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import com.ecommerce.product.security.InternalApiKeyFilter;
 import com.ecommerce.product.security.RestAccessDeniedHandler;
 import com.ecommerce.product.security.RestAuthenticationEntryPoint;
 import com.ecommerce.product.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * Binds, at the bean level, the two serialization invariants that a green HTTP suite can only prove
@@ -28,6 +32,7 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
 
   @Autowired private ApplicationContext applicationContext;
   @Autowired private ObjectMapper objectMapper;
+  @Autowired private List<SecurityFilterChain> securityFilterChains;
 
   /**
    * A1: the 401/403 renderers are constructor-injected with the Boot mapper, so a mapper-injection
@@ -35,13 +40,9 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
    * only that an import moved; this proves the beans exist and that {@code ObjectMapper} resolves
    * unambiguously to the single auto-configured instance their constructors consume.
    *
-   * <p>A1's evidence column also asks for {@code InternalApiKeyFilter} here, "on product". Verified
-   * at 1078cad: that clause is NOT dischargeable as written — the filter carries no stereotype and
-   * is never registered as a bean. {@code SecurityConfig} constructs it inline and installs it with
-   * {@code addFilterBefore(new InternalApiKeyFilter(internalApiKey, objectMapper), …)}, so {@code
-   * getBean(InternalApiKeyFilter.class)} throws {@code NoSuchBeanDefinitionException}. Its
-   * mapper-injection site is {@code SecurityConfig}'s own constructor, which any context reaching
-   * this test has already exercised.
+   * <p>Product's THIRD mapper-injection site is covered separately — see {@link
+   * #internalApiKeyFilter_isInstalledInTheChain_withItsMapperResolved()}, which explains why it
+   * cannot be asserted the way A1 prescribes.
    */
   @Test
   void securityEnvelopeRenderers_arePresent_andShareTheBootMapper() {
@@ -56,6 +57,48 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
         objectMapper,
         applicationContext.getBean(ObjectMapper.class),
         "the renderers must resolve the single auto-configured mapper, not a private one");
+  }
+
+  /**
+   * A1's intent for product's third mapper-injection site, discharged by a mechanism A1 does not
+   * describe.
+   *
+   * <p>A1's evidence column asks for {@code ctx.getBean(...)} on the two renderers "(and {@code
+   * InternalApiKeyFilter} on product)". That last clause is NOT dischargeable as written, verified
+   * at 1078cad: the filter carries no stereotype and is never registered as a bean. {@code
+   * SecurityConfig} constructs it inline and installs it via {@code addFilterBefore(new
+   * InternalApiKeyFilter(internalApiKey, objectMapper), JwtAuthenticationFilter.class)}, so {@code
+   * getBean(InternalApiKeyFilter.class)} throws {@code NoSuchBeanDefinitionException}. It is
+   * therefore asserted through the filter chain BECAUSE it is not a bean — do not "simplify" this
+   * back to a {@code getBean} lookup; that is the form that cannot work.
+   *
+   * <p>Mapper identity, not envelope shape, is what this adds. The envelope itself is already
+   * pinned exhaustively by {@code ErrorEnvelopePinIT#internalApiKeyFilter_pins401EnvelopeToExactly
+   * FourKeys_andNeverEchoesTheKey}, and — decisively — a behavioural assertion CANNOT discriminate
+   * a privately constructed mapper here: all four envelope keys ({@code error}, {@code message},
+   * {@code timestamp}, {@code path}) are single-token, so they render byte-identical under any
+   * naming strategy. Hence the field read: it is the only mechanism that carries information no
+   * other test in the suite holds. Its negative control is {@code objectMapper.copy()} at the
+   * construction site, which every behavioural test survives and this assertion does not.
+   */
+  @Test
+  void internalApiKeyFilter_isInstalledInTheChain_withItsMapperResolved() {
+    List<InternalApiKeyFilter> installed =
+        securityFilterChains.stream()
+            .flatMap(chain -> chain.getFilters().stream())
+            .filter(InternalApiKeyFilter.class::isInstance)
+            .map(InternalApiKeyFilter.class::cast)
+            .toList();
+
+    assertEquals(
+        1,
+        installed.size(),
+        "exactly one InternalApiKeyFilter must be installed in the security filter chain");
+    assertSame(
+        objectMapper,
+        ReflectionTestUtils.getField(installed.get(0), "objectMapper"),
+        "InternalApiKeyFilter must render its 401 envelope with the container's ObjectMapper,"
+            + " not a privately constructed one");
   }
 
   /**
