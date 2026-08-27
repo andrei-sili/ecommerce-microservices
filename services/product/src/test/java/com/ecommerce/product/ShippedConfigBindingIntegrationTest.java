@@ -86,10 +86,10 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
    *
    * <p>So state the value honestly: the harmful substitution is already caught hard, twice over.
    * This assertion's unique detection power covers the benign-today case — a configuration-
-   * equivalent copy, invisible to all 134 behavioural tests — and its worth is future-drift
-   * protection plus A1 coverage of the third mapper-injection site, not catching a live bug. Its
-   * negative control is {@code objectMapper.copy()} at the construction site, which yields exactly
-   * one red in the suite: this one.
+   * equivalent copy, invisible to every other behavioural test in the suite — and its worth is
+   * future-drift protection plus A1 coverage of the third mapper-injection site, not catching a
+   * live bug. Its negative control is {@code objectMapper.copy()} at the construction site, which
+   * yields exactly one red in the suite: this one.
    *
    * <p>The field read is acceptable BECAUSE it fails loud, never silently green: {@code
    * ReflectionTestUtils.getField} throws {@code IllegalArgumentException("Could not find field '%s'
