@@ -59,7 +59,7 @@ security:
   jwt:
     # Not a production key: the shipped file has no `secret` at all (phase-3 fail-closed, D3). HS256
     # stays exercisable here so the dual-accept matrix can prove both branches.
-    secret: test-secret-that-is-long-enough-for-hs256-1234567890
+    secret: test-secret-that-is-long-enough-for-hs256-1234567890 # gitleaks:allow
     # The shipped default is RS256-only; the matrix needs both branches live. RS256-only / HS256-only
     # suites narrow it again with their own @DynamicPropertySource. The public-keys map is NOT
     # overridden here: it comes from the shipped file, whose kid `user-rs256-2026-07` resolves its
