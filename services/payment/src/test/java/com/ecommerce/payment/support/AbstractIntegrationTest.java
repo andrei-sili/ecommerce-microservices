@@ -51,8 +51,19 @@ public abstract class AbstractIntegrationTest {
   /**
    * Wires the runtime-generated RSA public keys + the legacy HS256 secret so every context boots
    * with valid dual-accept material. Two kids are configured for the rotation-coexistence proof.
-   * {@code accepted-algs} stays at the test-yml default (HS256,RS256); the allowlist-contraction
+   * {@code accepted-algs} stays at the overlay default (HS256,RS256); the allowlist-contraction
    * suites override it with their own {@code @DynamicPropertySource}.
+   *
+   * <p><b>{@link JwtTestKeys#KID_A} must stay equal to the kid in the shipped {@code
+   * application.yml} ({@code security.jwt.public-keys.user-rs256-2026-07}).</b> Now that the
+   * shipped file is the base document, Boot MERGES map entries across property sources, so that
+   * entry is live in every test context; the registration below only neutralises it because it
+   * targets the SAME key at higher precedence. Measured, because the failure mode is not the
+   * obvious one: a {@code @ConfigurationProperties} binder does not throw on an unresolvable
+   * placeholder, it binds the literal text — renaming the shipped kid to one no test registers
+   * produced 102 context errors reading {@code NoSuchFileException: ${JWT_PUBLIC_KEY_PATH}}, which
+   * names a missing file rather than a config mismatch. If the two kids ever diverge, that is the
+   * message to expect.
    */
   @DynamicPropertySource
   static void jwtKeyProperties(DynamicPropertyRegistry registry) {
