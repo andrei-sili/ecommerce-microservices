@@ -25,17 +25,23 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * top, via the {@code test} profile activated below. Before the S-shadow slice the test tree held
  * an {@code application.yml} of its own, which shadowed the shipped file outright — so the suite
  * asserted a configuration it had handed itself, and mutating the shipped jackson block left all
- * 124 tests green. Any {@code @SpringBootTest} in this service must extend this class (or activate
- * the profile itself); a context without it fails loudly rather than degrading quietly.
+ * 124 tests green. Any {@code @SpringBootTest} in this service must extend this class, or activate
+ * the profile itself.
  *
- * <p>Measured, not assumed — a bare {@code @SpringBootTest} with no {@code @ActiveProfiles} dies at
- * {@code DataSourceProperties$DataSourceBeanCreationException}: <em>"Failed to configure a
- * DataSource: 'url' attribute is not specified and no embedded datasource could be configured.
- * Reason: Failed to determine a suitable driver class"</em>, and Boot's failure analyzer names the
- * cause itself — <em>"If you have database settings to be loaded from a particular profile you may
- * need to activate it (no profiles are currently active)"</em>. It is neither a placeholder
- * resolution failure nor Hikari's {@code 'url' must start with "jdbc"}: the binder resolves
- * placeholders leniently, so the url arrives unset rather than malformed.
+ * <p><strong>The invariant, verified independently twice: a context without the profile fails
+ * loudly during datasource creation and never degrades quietly.</strong> The shipped file supplies
+ * the datasource only through placeholders that nothing resolves without the test wiring, so the
+ * context dies on the way up rather than booting against some silently-wrong configuration. That is
+ * the part a reader needs, and it is the part both measurements agreed on.
+ *
+ * <p><strong>Deliberately NOT recorded here: the exact exception chain.</strong> It varies with the
+ * shape of the probe — which bean is reached first on the way to the datasource (Flyway and the
+ * DataSource are both on that path) decides which exception surfaces and whether Boot's failure
+ * analyzer renders at all. Two independent measurements on this same revision produced two
+ * different chains, each reproducible for its author and each absent from the other's output. So do
+ * not quote one chain as the behaviour, and do not "correct" this note to name whichever one your
+ * probe shows: a specific exception name in a comment is a measurement, and this one does not even
+ * need the code to change before it goes stale — a differently-shaped probe is enough.
  */
 @SpringBootTest
 @ActiveProfiles("test")
