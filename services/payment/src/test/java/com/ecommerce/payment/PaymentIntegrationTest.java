@@ -50,7 +50,7 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
   private static final String OTHER_USER = TestJwt.bearer(TestJwt.token("99", List.of("USER")));
   private static final String ADMIN = TestJwt.bearer(TestJwt.token("1", List.of("ADMIN")));
 
-  /** Must match test application.yml security.webhook.secret */
+  /** Must match security.webhook.secret in the test profile overlay (application-test.yml). */
   private static final String WEBHOOK_SECRET = "test-webhook-secret";
 
   @Autowired private MockMvc mockMvc;

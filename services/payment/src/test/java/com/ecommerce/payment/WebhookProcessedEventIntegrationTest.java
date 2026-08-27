@@ -45,12 +45,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * The webhook pinned by its EFFECT rather than its status code, and the replay pinned so that
  * deleting the idempotency guards is RED.
  *
- * <p><b>This does not discharge B11.</b> The MockMvc form cannot: payment's {@code
- * src/test/resources/application.yml} shadows the shipped file, so the snake_case naming strategy
- * these assertions depend on is the TEST yml's, and a casing flip in production config stays
- * invisible here. What this class gives is the in-suite effect assertion — the row must exist and
- * bind to the real payment, so a status-only regression is caught. B11 on the wire is compose/smoke
- * evidence, driven directly at the payment container.
+ * <p><b>This now carries B11 in-suite.</b> It previously could not: payment's {@code
+ * src/test/resources/application.yml} shadowed the shipped file, so the snake_case naming strategy
+ * these assertions depend on was the TEST yml's and a casing flip in production config stayed
+ * invisible here. Since the shadow became a profile overlay ({@code application-test.yml}), the
+ * webhook body below binds through the SHIPPED {@code spring.jackson.property-naming-strategy};
+ * flipping it there makes {@code event_id}/{@code gateway_payment_id} stop binding and this class
+ * goes RED. Compose/smoke evidence at the container remains the on-the-wire confirmation, not the
+ * only proof.
  *
  * <p>The endpoint answers 200 to a body it could not use: {@code PaymentService} logs a WARN and
  * returns 200 when {@code event_id} is missing, and the persistence service acks an unresolvable
