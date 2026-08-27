@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -31,19 +30,21 @@ import org.springframework.test.web.servlet.MockMvc;
  * unauthenticated caller on the pod network — while {@code $.status} stays {@code "UP"} and stays
  * green.
  *
- * <p><strong>Read this before trusting the word "exact": these bodies are NOT read from the shipped
- * yml, and this class cannot detect shipped-yml drift at all.</strong> {@code
- * src/test/resources/application.yml} fully shadows {@code src/main/resources/application.yml} and
- * contains no {@code management} block whatsoever, so the {@code @TestPropertySource} below is what
- * supplies the configuration — it replays the shipped values by hand. Measured, not assumed: adding
- * {@code management.endpoint.health.show-details: always} to the SHIPPED yml and running the whole
- * suite gives <em>119/119 green</em>. The same key injected below turns two of these rows red. So a
- * green here means "the endpoint renders this body under these values", never "the shipped file
- * still holds these values" — and the drift it cannot see is precisely the disclosure described in
- * the paragraph above. Closing that half is the shadow slice's job (contract §6.9, §10); it is
- * deliberately NOT worked around here, because asserting against the test yml would make the pin
- * blinder rather than better. This note lives in the test file on purpose: {@code agent_docs/} is
- * gitignored, so the committed artefact is the only durable home for the limit.
+ * <p><strong>These bodies ARE read from the shipped yml — that half was closed by the S-shadow
+ * slice.</strong> This class used to carry a {@code @TestPropertySource} replaying {@code
+ * management.endpoints.web.exposure.include}, {@code management.endpoint.health.probes.enabled} and
+ * {@code management.endpoint.health.group.readiness.include} by hand, because {@code
+ * src/test/resources/application.yml} shadowed the shipped file and contained no {@code management}
+ * block at all. A green then meant "the endpoint renders this body under these values", never "the
+ * shipped file still holds these values" — measured at the time: adding {@code
+ * management.endpoint.health.show-details: always} to the SHIPPED yml left the whole suite green.
+ * The test config is now a profile overlay that deliberately declares no {@code management} keys,
+ * so the values come from {@code src/main/resources/application.yml} and that same mutation turns
+ * the root and readiness rows below red. <strong>Do not reintroduce a {@code @TestPropertySource}
+ * for any {@code management.*} key here</strong> — it would re-blind the class to exactly the
+ * disclosure described in the paragraph above. This note lives in the test file on purpose: {@code
+ * agent_docs/} is gitignored, so the committed artefact is the only durable home for the limit and
+ * its closure.
  *
  * <p>One asymmetry worth knowing when reading a failure: under a {@code show-details} flip the root
  * and readiness rows go red but liveness does not. Boot's auto-configured probe groups hardcode
@@ -54,12 +55,6 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>The security configuration itself is production code, untouched.
  */
 @AutoConfigureMockMvc
-@TestPropertySource(
-    properties = {
-      "management.endpoints.web.exposure.include=health,info,prometheus",
-      "management.endpoint.health.probes.enabled=true",
-      "management.endpoint.health.group.readiness.include=readinessState,db"
-    })
 class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
 
   /** Actuator negotiates its own vendor type; a drift to plain {@code application/json} matters. */
