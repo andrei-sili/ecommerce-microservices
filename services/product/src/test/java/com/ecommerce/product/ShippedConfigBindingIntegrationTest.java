@@ -74,12 +74,27 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
    *
    * <p>Mapper identity, not envelope shape, is what this adds. The envelope itself is already
    * pinned exhaustively by {@code ErrorEnvelopePinIT#internalApiKeyFilter_pins401EnvelopeToExactly
-   * FourKeys_andNeverEchoesTheKey}, and — decisively — a behavioural assertion CANNOT discriminate
-   * a privately constructed mapper here: all four envelope keys ({@code error}, {@code message},
-   * {@code timestamp}, {@code path}) are single-token, so they render byte-identical under any
-   * naming strategy. Hence the field read: it is the only mechanism that carries information no
-   * other test in the suite holds. Its negative control is {@code objectMapper.copy()} at the
-   * construction site, which every behavioural test survives and this assertion does not.
+   * FourKeys_andNeverEchoesTheKey}. What behaviour cannot discriminate is a
+   * CONFIGURATION-EQUIVALENT mapper (e.g. {@code objectMapper.copy()}): all four envelope keys
+   * ({@code error}, {@code message}, {@code timestamp}, {@code path}) are single-token, so naming
+   * strategy cannot separate them. A bare {@code new ObjectMapper()} IS caught behaviourally —
+   * measured, not assumed: it reddens {@code ErrorEnvelopePinIT} and {@code
+   * ReservationIT#missingOrWrongInternalKeyIsUnauthorized} with "Java 8 date/time type
+   * java.time.Instant not supported by default", because the discriminating axis is {@code
+   * ErrorResponse.timestamp} being an {@code Instant} with no {@code JavaTimeModule}, NOT the
+   * naming strategy.
+   *
+   * <p>So state the value honestly: the harmful substitution is already caught hard, twice over.
+   * This assertion's unique detection power covers the benign-today case — a configuration-
+   * equivalent copy, invisible to all 134 behavioural tests — and its worth is future-drift
+   * protection plus A1 coverage of the third mapper-injection site, not catching a live bug. Its
+   * negative control is {@code objectMapper.copy()} at the construction site, which yields exactly
+   * one red in the suite: this one.
+   *
+   * <p>The field read is acceptable BECAUSE it fails loud, never silently green: {@code
+   * ReflectionTestUtils.getField} throws {@code IllegalArgumentException("Could not find field '%s'
+   * on %s or target class [%s]")} when the field is absent (verified in spring-test-6.2.19.jar), so
+   * renaming {@code objectMapper} breaks this test by name rather than quietly passing.
    */
   @Test
   void internalApiKeyFilter_isInstalledInTheChain_withItsMapperResolved() {
