@@ -17,9 +17,16 @@
 # and requires a per-test written justification at the gate — never a silent floor edit. Raising a
 # floor after adding tests is expected and welcome; re-measure with surefire, do not grep.
 #
+# Re-measured 2026-08-27 at main 64877ca (after the S-shadow slices landed), by running
+# `./mvnw -B clean verify` per service and summing surefire's executed-minus-skipped from the
+# XML set re-listed AFTER each build exited -- not from a grep, and not from a directory read
+# mid-build. Every build was BUILD SUCCESS. Previous values (97/99/85/115/84) were measured on
+# 3.5.16 at f7e549c and had drifted 19-36 below reality, which is far enough that the gate would
+# not have noticed a slice deleting thirty tests -- the exact failure this file exists to catch.
+#
 # format: <service> <minimum executed tests>
-user 97
-product 99
-cart 85
-order 115
-payment 84
+user 128
+product 135
+cart 104
+order 141
+payment 111
