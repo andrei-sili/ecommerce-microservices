@@ -15,18 +15,18 @@
 #
 # Only genuinely test-specific values belong here.
 spring:
-  # RabbitMQ: localhost during tests. Business tests @MockitoBean OutboxRelay so no connection opens;
-  # the non-mocked broker seam tests (OutboxRelay*IntegrationTest) point these at a Testcontainers
-  # broker via @DynamicPropertySource and flip `dynamic` back on.
+  # RabbitMQ: localhost during tests, so nothing tries to resolve the compose hostname `rabbitmq`.
+  # Business tests @MockitoBean OutboxRelay so no connection opens; the non-mocked broker seam tests
+  # (OutboxRelay*IntegrationTest) point host/port/credentials at a Testcontainers broker via
+  # @DynamicPropertySource and flip `dynamic` back on.
   #
-  # `publisher-confirm-type` / `publisher-returns` are NOT repeated here on purpose - the relay's
+  # `port`, `username` and `password` are NOT repeated here: the shipped defaults are already
+  # 5672/guest/guest, and a key present in both files is a key no mutation of the shipped file can
+  # falsify. Same reason `publisher-confirm-type` / `publisher-returns` are absent - the relay's
   # "broker confirm != routable" logic reads them from the SHIPPED file now, so deleting either one
   # THERE turns the seam tests RED.
   rabbitmq:
     host: localhost
-    port: 5672
-    username: guest
-    password: guest
     # No RabbitAdmin connecting/declaring topology at startup for the mocked-relay tests.
     dynamic: false
 
