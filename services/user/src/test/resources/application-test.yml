@@ -18,7 +18,15 @@
 #   * spring.datasource.*, security.jwt.private-key-path, security.jwt.public-keys — supplied per
 #                         context by @DynamicPropertySource (Testcontainers / generated RSA keys),
 #                         which outranks both ymls, so the shipped placeholders stay unevaluated.
-#   * spring.jpa.*, spring.flyway.* — identical in both files; tests run the shipped values.
+#   * admin.bootstrap.*   — pinned empty in AbstractIntegrationTest#adminBootstrapStaysDisabled, NOT
+#                         here. A yml pin cannot hold: OS env outranks profile yml, and
+#                         ADMIN_BOOTSTRAP_EMAIL/ADMIN_BOOTSTRAP_PASSWORD bind straight to these keys.
+#                         Measured — the yml version let a test run seed a real ADMIN account.
+#   * spring.jpa.*, spring.flyway.* — tests now run the shipped values. Note this is NOT a no-op:
+#                         the shipped file declares two keys the old shadow omitted, and test
+#                         contexts inherit both by design — `spring.jpa.properties.hibernate.jdbc
+#                         .time_zone: UTC` (closes contract D13's gap: user's test config had no UTC
+#                         pin) and `spring.flyway.baseline-on-migrate: false`.
 
 security:
   jwt:
@@ -32,11 +40,3 @@ security:
     # baseline posture; the RS256-only classes narrow `accepted-algs` back per context.
     signing-alg: HS256
     accepted-algs: HS256,RS256
-
-admin:
-  bootstrap:
-    # Pinned empty on purpose: the shipped values are ${ADMIN_EMAIL:} / ${ADMIN_PASSWORD:}, so an
-    # ambient ADMIN_EMAIL / ADMIN_PASSWORD in a developer shell would otherwise bootstrap a real
-    # admin account during the test run. Isolation from the environment, not a copy of a tested value.
-    email: ""
-    password: ""

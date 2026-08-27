@@ -26,8 +26,16 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * an {@code application.yml} of its own, which shadowed the shipped file outright — so the suite
  * asserted a configuration it had handed itself, and mutating the shipped jackson block left all
  * 124 tests green. Any {@code @SpringBootTest} in this service must extend this class (or activate
- * the profile itself); a context without it fails loudly on the shipped file's mandatory {@code
- * ${SPRING_DATASOURCE_URL}} placeholder rather than degrading quietly.
+ * the profile itself); a context without it fails loudly rather than degrading quietly.
+ *
+ * <p>Measured, not assumed — a bare {@code @SpringBootTest} with no {@code @ActiveProfiles} dies at
+ * {@code DataSourceProperties$DataSourceBeanCreationException}: <em>"Failed to configure a
+ * DataSource: 'url' attribute is not specified and no embedded datasource could be configured.
+ * Reason: Failed to determine a suitable driver class"</em>, and Boot's failure analyzer names the
+ * cause itself — <em>"If you have database settings to be loaded from a particular profile you may
+ * need to activate it (no profiles are currently active)"</em>. It is neither a placeholder
+ * resolution failure nor Hikari's {@code 'url' must start with "jdbc"}: the binder resolves
+ * placeholders leniently, so the url arrives unset rather than malformed.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -85,6 +93,26 @@ public abstract class AbstractIntegrationTest {
         "security.jwt.public-keys[" + JwtTestKeys.KID_A + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_A);
     registry.add(
         "security.jwt.public-keys[" + JwtTestKeys.KID_B + "]", () -> JwtTestKeys.PUBLIC_KEY_PATH_B);
+  }
+
+  /**
+   * Keeps {@link com.ecommerce.user.config.AdminBootstrapRunner} inert for every test context.
+   *
+   * <p><strong>This pin must NOT be moved into {@code application-test.yml}.</strong> It lived
+   * there until the review of this slice and did not work: OS environment variables outrank profile
+   * YAML in Spring's property order, and {@code ADMIN_BOOTSTRAP_EMAIL} / {@code
+   * ADMIN_BOOTSTRAP_PASSWORD} bind straight to {@code admin.bootstrap.*} by relaxed binding, so a
+   * shell exporting them beat the yml pin. Measured at {@code 98e0f09}, both exported, running one
+   * context: the runner logged "Admin bootstrap: seeded initial ADMIN account" — a real ADMIN
+   * account created by a test run on the auth service. {@code @DynamicPropertySource} is registered
+   * ahead of the environment, so it wins. (The yml pin did block {@code ADMIN_EMAIL}/{@code
+   * ADMIN_PASSWORD}, which reach the property only as placeholders in the shipped file — but those
+   * are not the names the binder reads.)
+   */
+  @DynamicPropertySource
+  static void adminBootstrapStaysDisabled(DynamicPropertyRegistry registry) {
+    registry.add("admin.bootstrap.email", () -> "");
+    registry.add("admin.bootstrap.password", () -> "");
   }
 
   @DynamicPropertySource
