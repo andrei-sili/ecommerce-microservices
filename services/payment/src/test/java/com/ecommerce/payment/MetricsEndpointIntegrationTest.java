@@ -15,20 +15,23 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.http.HttpHeaders;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
  * Wave 5c observability: the Prometheus scrape endpoint must be reachable by an unauthenticated
  * scraper through the REAL security chain, while business endpoints stay locked. No filter chain is
- * mocked here — the app's own {@code SecurityFilterChain} decides every request. The exposure list
- * mirrors production {@code application.yml} (the shared test yml keeps actuator defaults);
+ * mocked here — the app's own {@code SecurityFilterChain} decides every request.
  * {@code @AutoConfigureObservability} re-enables the metrics export that {@code @SpringBootTest}
  * disables by default, so the real Prometheus endpoint is created just like in production.
+ *
+ * <p><b>The exposure list is NOT re-declared here.</b> It used to be, in a
+ * {@code @TestPropertySource} mirroring production because the shared test yml kept actuator
+ * defaults — which meant this class scraped an endpoint it had exposed itself, and dropping {@code
+ * prometheus} from the shipped {@code exposure.include} would have stayed green (contract F5). It
+ * now comes from the shipped {@code application.yml} through the {@code test} profile overlay.
  */
 @AutoConfigureObservability
-@TestPropertySource(properties = "management.endpoints.web.exposure.include=health,info,prometheus")
 class MetricsEndpointIntegrationTest extends AbstractIntegrationTest {
 
   private static final String PROMETHEUS_PATH = "/actuator/prometheus";
