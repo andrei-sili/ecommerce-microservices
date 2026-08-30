@@ -4,13 +4,13 @@ import com.ecommerce.order.config.ClientsProperties;
 import com.ecommerce.order.exception.ApiException;
 import com.ecommerce.order.exception.InsufficientStockException;
 import com.ecommerce.order.exception.UpstreamServiceException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.io.IOException;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * System calls to Product's internal inventory reservation API, authenticated with the shared
@@ -130,7 +130,7 @@ public class ProductReservationClient {
   private UpstreamError readError(java.io.InputStream body) {
     try {
       return objectMapper.readValue(body, UpstreamError.class);
-    } catch (IOException ex) {
+    } catch (JacksonException ex) {
       return null;
     }
   }

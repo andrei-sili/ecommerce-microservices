@@ -18,8 +18,6 @@ import com.ecommerce.order.model.OrderStatus;
 import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
 import com.ecommerce.order.support.AbstractIntegrationTest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
@@ -35,6 +33,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Shared scaffolding for the Slice 5e dual-accept validation suites on Order: exercises the REAL
@@ -169,8 +169,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
-    Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    Set<String> keys = new HashSet<>(body.propertyNames());
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,

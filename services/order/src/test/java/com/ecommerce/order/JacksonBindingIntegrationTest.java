@@ -4,11 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.ecommerce.order.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
 
 /**
  * B9's bean-level half: the two {@code spring.jackson.*} properties Order's wire contract rests on
@@ -38,7 +38,7 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
   void bootMapper_usesSnakeCaseNaming() {
     assertEquals(
         PropertyNamingStrategies.SNAKE_CASE,
-        objectMapper.getSerializationConfig().getPropertyNamingStrategy(),
+        objectMapper.serializationConfig().getPropertyNamingStrategy(),
         "spring.jackson.property-naming-strategy must still bind from the SHIPPED application.yml —"
             + " REST bodies are snake_case (event payloads stay camelCase, see"
             + " OutboxGoldenPayloadTest)");
@@ -48,7 +48,7 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
   void bootMapper_suppressesNulls() {
     assertEquals(
         JsonInclude.Include.NON_NULL,
-        objectMapper.getSerializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
+        objectMapper.serializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
         "spring.jackson.default-property-inclusion must still bind from the SHIPPED"
             + " application.yml — it is the fleet-wide default that keeps nulls out of response"
             + " bodies. Note it is NOT what holds the error envelope at four keys: ErrorResponse"

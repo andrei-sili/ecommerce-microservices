@@ -2,6 +2,12 @@ spring:
   application:
     name: order-service
   jackson:
+    # TEMPORARY, removed in the ABSORB commit of this same slice. Restores the Jackson 2 default
+    # feature set on the Jackson 3 mapper (configureForJackson2 disables SORT_PROPERTIES_
+    # ALPHABETICALLY among others), so this commit changes the version and the imports while the
+    # serialized output stays byte-identical. That is what lets a body diff appearing later be
+    # bisected to the defaults rather than to the bump.
+    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
   datasource:

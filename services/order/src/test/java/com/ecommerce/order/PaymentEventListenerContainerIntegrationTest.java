@@ -194,7 +194,7 @@ class PaymentEventListenerContainerIntegrationTest extends AbstractIntegrationTe
         paymentId, orderId, USER_ID);
   }
 
-  private int readyMessages(String queue) {
+  private long readyMessages(String queue) {
     return rabbitAdmin.getQueueInfo(queue).getMessageCount();
   }
 

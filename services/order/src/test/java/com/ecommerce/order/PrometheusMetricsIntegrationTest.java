@@ -15,7 +15,7 @@ import com.ecommerce.order.support.TestJwt;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -25,10 +25,10 @@ import org.springframework.test.web.servlet.MockMvc;
  * stays locked down. Runs full-context (real security filter chain + dispatcher + Postgres); the
  * endpoint is never mocked.
  *
- * <p>{@code @AutoConfigureObservability} is required because {@code @SpringBootTest} disables
- * metrics export (hence the Prometheus registry + scrape endpoint) by default in the test context.
+ * <p>{@code @AutoConfigureMetrics} is required because {@code @SpringBootTest} disables metrics
+ * export (hence the Prometheus registry + scrape endpoint) by default in the test context.
  */
-@AutoConfigureObservability
+@AutoConfigureMetrics
 class PrometheusMetricsIntegrationTest extends AbstractIntegrationTest {
 
   private static final String PROMETHEUS_PATH = "/actuator/prometheus";

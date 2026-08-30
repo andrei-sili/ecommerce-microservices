@@ -4,12 +4,11 @@ import com.ecommerce.order.model.OrderEntity;
 import com.ecommerce.order.model.OrderItem;
 import com.ecommerce.order.model.OutboxEvent;
 import com.ecommerce.order.repository.OutboxEventRepository;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Records domain events in the transactional outbox. Wave 2 only persists them; the RabbitMQ relay
@@ -24,10 +23,7 @@ public class OutboxService {
   // Dedicated mapper: the event contract uses camelCase field names (orderId, occurredAt),
   // independent of the API's snake_case JSON convention.
   private final JsonMapper mapper =
-      JsonMapper.builder()
-          .addModule(new JavaTimeModule())
-          .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .build();
+      JsonMapper.builder().disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS).build();
 
   public OutboxService(OutboxEventRepository repository) {
     this.repository = repository;

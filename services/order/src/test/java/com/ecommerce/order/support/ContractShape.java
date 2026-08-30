@@ -2,9 +2,9 @@ package com.ecommerce.order.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Wire-shape assertions shared by the contract pins. Key sets are asserted EXACTLY (never as a
@@ -25,9 +25,7 @@ public final class ContractShape {
 
   /** Field names of a JSON object, in document order. */
   public static Set<String> keysOf(JsonNode object) {
-    Set<String> keys = new LinkedHashSet<>();
-    object.fieldNames().forEachRemaining(keys::add);
-    return keys;
+    return new LinkedHashSet<>(object.propertyNames());
   }
 
   /** Asserts the field is a JSON String holding an ISO-8601 UTC instant. */
