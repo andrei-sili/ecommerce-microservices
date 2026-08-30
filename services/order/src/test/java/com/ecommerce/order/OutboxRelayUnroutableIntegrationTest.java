@@ -47,6 +47,21 @@ import org.testcontainers.utility.DockerImageName;
  * Determinism comes purely from "queue absent vs present" — no reconnect timing, no fixed sleeps
  * (the relay blocks on bounded publisher confirms; message retrieval uses a bounded receive).
  */
+/*
+ * C3 (per-row correlation attribution) IS NOT PROVEN BY THIS CLASS, OR ANYWHERE IN order.
+ *
+ * C3 asks that within ONE drain a routable ack is never mis-attributed to a returned row. Order
+ * derives a single routing key (order.placed) for every event it publishes, so a batch containing
+ * both a routable and a returned row cannot be constructed here at all: the rows either all route
+ * or all return. The invariant is therefore structurally unreachable on this service, not merely
+ * untested, and no amount of work on order can close it.
+ *
+ * It is constructible only on payment, which derives three keys and can bind one while leaving
+ * another unbound. Recorded explicitly and in the committed tree, because the dangerous failure
+ * mode is a later reader seeing this service's broker suite pass and concluding the fleet has C3
+ * covered. It does not. Do not sign order off as having proven C3, and do not shorten payment's
+ * slice on the grounds that order passed.
+ */
 class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
 
   private static final String EXCHANGE = "ecommerce.events";
@@ -232,6 +247,56 @@ class OutboxRelayUnroutableIntegrationTest extends AbstractIntegrationTest {
     rabbitAdmin.declareQueue(queue);
     rabbitAdmin.declareBinding(
         BindingBuilder.bind(queue).to(new TopicExchange(EXCHANGE, true, false)).with(ROUTING_KEY));
+  }
+
+  /**
+   * C10: a production-size batch drains in ONE pass. Order gives every row its own full {@code
+   * confirmTimeoutMs}, so a batch that is fine at one row can still degrade badly at production
+   * size if confirm latency rises — and the degradation is quiet, because consumers dedup, so the
+   * visible symptom is only outbox growth.
+   *
+   * <p>Asserts all ten published, ten DISTINCT deliveries (a redelivery of one message would
+   * otherwise satisfy a naive count of ten), an eleventh receive that is null, and a wall clock
+   * inside {@code confirmTimeoutMs / 2}. BATCH_SIZE is 50, so ten rows are structurally one pass.
+   */
+  @Test
+  void productionSizeBatch_drainsInOnePass_withTenDistinctDeliveries() {
+    bindConsumerQueue();
+
+    java.util.List<Long> ids = new java.util.ArrayList<>();
+    for (int i = 0; i < 10; i++) {
+      ids.add(insertRow("c10-order-" + i, "OrderPlaced").getId());
+    }
+
+    long startNanos = System.nanoTime();
+    outboxRelay.drain();
+    long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L;
+
+    for (Long id : ids) {
+      assertThat(outboxEventRepository.findById(id).orElseThrow().getPublishedAt())
+          .as("every row in a 10-row batch must be marked published after ONE drain")
+          .isNotNull();
+    }
+
+    java.util.Set<String> deliveredIds = new java.util.HashSet<>();
+    for (int i = 0; i < 10; i++) {
+      Message m = rabbitTemplate.receive(CONSUMER_QUEUE, 5000);
+      assertThat(m).as("delivery %s of 10 must arrive", i + 1).isNotNull();
+      deliveredIds.add(m.getMessageProperties().getMessageId());
+    }
+    assertThat(deliveredIds)
+        .as("ten DISTINCT messages — a redelivered duplicate must not be counted as progress")
+        .hasSize(10);
+
+    assertThat(rabbitTemplate.receive(CONSUMER_QUEUE, 500))
+        .as("no eleventh message: the batch must not publish more than it drained")
+        .isNull();
+
+    // confirm-timeout-ms defaults to 5000 (shipped yml; the test overlay sets no outbox key), so
+    // the contract's confirmTimeoutMs/2 bound is 2500ms.
+    assertThat(elapsedMs)
+        .as("10-row batch wall clock must stay inside confirmTimeoutMs/2; was %sms", elapsedMs)
+        .isLessThan(2500L);
   }
 
   private OutboxEvent insertOrderPlacedRow() {

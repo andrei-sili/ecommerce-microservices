@@ -49,6 +49,10 @@ class WireContentTypeIntegrationTest extends AbstractIntegrationTest {
    * Measured 2026-08-25 on Spring Boot 3.5.16 / embedded Tomcat, read with {@code
    * java.net.http.HttpClient} so nothing normalises the header: {@code GET /api/v1/orders} with no
    * Authorization → {@code application/json;charset=ISO-8859-1}.
+   *
+   * <p>Both hand-written entry points land here, so the constant is shared by the 401 and 403 rows.
+   * Re-measured on Boot 4.1.1 / Tomcat 11 while adding the 403 row: unchanged on both. That the
+   * string survived the bump is the finding this class was written to be able to state.
    */
   private static final String PATH_A_CONTENT_TYPE = "application/json;charset=ISO-8859-1";
 
@@ -91,6 +95,27 @@ class WireContentTypeIntegrationTest extends AbstractIntegrationTest {
         .as("path A is written via response.getWriter(); the container stamps its default charset")
         .isEqualTo(PATH_A_CONTENT_TYPE);
     assertThat(response.body()).contains("\"error\":\"UNAUTHORIZED\"");
+  }
+
+  /**
+   * Path A, the 403 half — the wire value behind {@code
+   * FrameworkErrorMappingIntegrationTest#deniedPath_withValidToken_returns403_withExactForbiddenEnvelope},
+   * whose MockMvc assertion reads a normalised {@code application/json}. {@code
+   * RestAccessDeniedHandler} writes through {@code getWriter()} exactly as the entry point does, so
+   * the same container charset is expected — asserted here rather than inferred from the 401,
+   * because "same code shape" is an argument, not a measurement, and A8 says a MockMvc identity
+   * assertion may never be quoted as evidence of the production string.
+   */
+  @Test
+  void denied403_wireContentType_carriesTheContainerCharset() throws Exception {
+    HttpResponse<String> response =
+        get("/internal-denied", TestJwt.bearer(TestJwt.token("7", List.of("USER"))));
+
+    assertThat(response.statusCode()).isEqualTo(403);
+    assertThat(contentType(response))
+        .as("path A is written via response.getWriter(); the container stamps its default charset")
+        .isEqualTo(PATH_A_CONTENT_TYPE);
+    assertThat(response.body()).contains("\"error\":\"FORBIDDEN\"");
   }
 
   /** Path B, success side: the converter stack emits no charset parameter. */

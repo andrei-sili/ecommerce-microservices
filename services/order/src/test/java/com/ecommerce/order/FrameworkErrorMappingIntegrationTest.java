@@ -19,6 +19,8 @@ import com.ecommerce.order.client.CartClient;
 import com.ecommerce.order.client.CartView;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.client.ReservationResponse;
+import com.ecommerce.order.exception.ApiException;
+import com.ecommerce.order.exception.GlobalExceptionHandler;
 import com.ecommerce.order.exception.InsufficientStockException;
 import com.ecommerce.order.repository.OrderRepository;
 import com.ecommerce.order.repository.OutboxEventRepository;
@@ -28,7 +30,9 @@ import com.ecommerce.order.support.TestJwt;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -439,5 +447,126 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
       assertFalse(
           body.contains(forbidden), "error body leaked internals (\"" + forbidden + "\"): " + body);
     }
+  }
+
+  /**
+   * A6. The 403 envelope, which order had zero coverage of. {@code /internal-denied} is
+   * deliberately a path the dispatcher never maps AND that matches only the terminal {@code
+   * denyAll()} rule, so it is decided by the security chain rather than by exposure — unlike {@code
+   * /actuator/env}, whose status is a product of exposure x security and can flip 403 -> 404 for
+   * reasons that have nothing to do with the envelope.
+   *
+   * <p>Rendered by {@code RestAccessDeniedHandler} via {@code response.getWriter()}, which bypasses
+   * the {@code @RestControllerAdvice} entirely — so nothing else in this class covers it.
+   *
+   * <p><b>The Content-Type assertion below pins MockMvc's NORMALISATION, not the production
+   * string.</b> On the wire this response carries {@code application/json;charset=ISO-8859-1}:
+   * measured through {@code java.net.http.HttpClient} against this service's own Tomcat at Boot
+   * 4.1.1, by {@code
+   * WireContentTypeIntegrationTest#denied403_wireContentType_carriesTheContainerCharset}. The
+   * servlet spec makes the container stamp its default charset onto a writer response, and MockMvc
+   * reports the value the framework computed BEFORE the container touched it, so the bare {@code
+   * application/json} asserted here is a value MockMvc cannot avoid producing. Contract A8 is
+   * explicit that such an in-suite string may never be quoted as evidence of the production
+   * invariant — the wire row is the evidence, this row is the envelope. Recorded in the committed
+   * file rather than in a report: the measurement is the only reason the constant below is not a
+   * number without a history.
+   */
+  @Test
+  void deniedPath_withValidToken_returns403_withExactForbiddenEnvelope() throws Exception {
+    MvcResult result =
+        mockMvc
+            .perform(get("/internal-denied").header("Authorization", USER))
+            .andExpect(status().isForbidden())
+            .andReturn();
+
+    // Media type leads (contract 4h(3)): every way this row drifts also destroys the body, so a
+    // body assertion placed first would report "No value at JSON path" instead of naming the cause.
+    String contentType = result.getResponse().getContentType();
+    assertThat(contentType).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(ContractShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(body.get("error").asText()).isEqualTo("FORBIDDEN");
+    assertThat(body.get("message").asText()).isEqualTo("Insufficient permissions");
+    assertThat(body.get("path").asText()).isEqualTo("/internal-denied");
+    ContractShape.assertIso8601Utc(body, "timestamp");
+  }
+
+  /**
+   * A10, structural half. The catch-all {@code @ExceptionHandler(Exception.class)} must stay the
+   * only 500 producer, and no standalone handler may become ambiguous with a type the {@link
+   * ResponseEntityExceptionHandler} base class already maps — that is a STARTUP crash
+   * ("Ambiguous @ExceptionHandler"), not a test failure, so it would take the whole service down.
+   *
+   * <p>The base-mapped set is read reflectively from the framework on the classpath rather than
+   * hard-coded, so this goes red if a future Spring version ADDS a mapping that collides with one
+   * of ours ({@code MissingRequestHeaderException} sits under {@code
+   * ServletRequestBindingException}, {@code MethodArgumentTypeMismatchException} under {@code
+   * TypeMismatchException} — both legal today precisely because only the SUPERtypes are
+   * base-mapped).
+   *
+   * <p><b>The standalone set is pinned EXACTLY, not by {@code contains}.</b> A subset assertion
+   * discharges the "no ambiguity" half but not the "single 500 producer" half: a brand-new
+   * {@code @ExceptionHandler} returning 500 satisfies {@code contains(Exception.class)} while
+   * adding the second producer the row forbids. An exact set turns any new standalone handler into
+   * a deliberate decision — add it here, and say which status it renders.
+   *
+   * <p><b>"Only 500" is narrower than "only 5xx", and the gap is already occupied.</b> {@link
+   * GlobalExceptionHandler#handleApi} renders {@code ex.getStatus()}, and {@code
+   * UpstreamServiceException} extends {@code ApiException} carrying {@code BAD_GATEWAY} — so a
+   * standalone handler emits a 502 today, on every placement that cannot reach cart or product.
+   * That is correct per api-design.md and leaves the row's letter intact: the catch-all stays the
+   * only producer of 500. Read the assertion message as written — a new standalone handler is a
+   * candidate second 500 producer, not a claim that no standalone handler may be 5xx. That 502 has
+   * no status row of its own anywhere in this module; the seam suites assert the exception TYPE
+   * ({@code CartClientWireTest}, {@code ProductReservationClientWireTest}), never the rendered
+   * status.
+   *
+   * <p>Scope, so the row is not read louder than it is. This pins WHICH types get a standalone
+   * handler; it does not execute them, so it cannot see one of the four non-catch-all handlers
+   * being changed to return 500. Those statuses are held by behavioural rows: 409 {@code
+   * INSUFFICIENT_STOCK} (#10 and #11 here, {@code OrderControllerWebTest}, {@code
+   * OrderPlacementIntegrationTest}), the {@code ApiException} statuses across the placement suites
+   * — the 502 above excepted — 400 {@code IDEMPOTENCY_KEY_REQUIRED} (#12 here) and 400 {@code
+   * MALFORMED_REQUEST} (#5 here). Nor is the base class covered by the phrase "only 500 producer":
+   * {@code ResponseEntityExceptionHandler} maps framework types that are 5xx by definition (a
+   * missing path variable is a mapping bug), which is why {@link
+   * GlobalExceptionHandler#handleExceptionInternal} has a 5xx branch at all. The claim is about OUR
+   * standalone handlers.
+   */
+  @Test
+  void noStandaloneHandlerIsAmbiguousWithTheBaseClass_andTheCatchAllIsTheOnly500() {
+    Set<Class<?>> baseMapped = mappedTypes(ResponseEntityExceptionHandler.class);
+    Set<Class<?>> standalone = mappedTypes(GlobalExceptionHandler.class);
+
+    assertThat(baseMapped).as("reflection must actually find the base mappings").isNotEmpty();
+    assertThat(standalone).as("reflection must actually find our handlers").isNotEmpty();
+
+    assertThat(standalone)
+        .as(
+            "a standalone @ExceptionHandler declaring a type the base class already maps is an"
+                + " ambiguous mapping and fails startup")
+        .doesNotContainAnyElementsOf(baseMapped);
+
+    assertThat(standalone)
+        .as(
+            "the catch-all must remain, and remain the ONLY standalone handler — a new one here is"
+                + " a candidate second 500 producer and must be justified, not absorbed")
+        .containsExactlyInAnyOrder(
+            InsufficientStockException.class,
+            ApiException.class,
+            MissingRequestHeaderException.class,
+            MethodArgumentTypeMismatchException.class,
+            Exception.class);
+  }
+
+  private static Set<Class<?>> mappedTypes(Class<?> handler) {
+    return Arrays.stream(handler.getDeclaredMethods())
+        .map(m -> m.getAnnotation(ExceptionHandler.class))
+        .filter(java.util.Objects::nonNull)
+        .flatMap(a -> Arrays.stream(a.value()))
+        .collect(java.util.stream.Collectors.toSet());
   }
 }
