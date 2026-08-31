@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -23,7 +24,9 @@ import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
+import com.ecommerce.payment.support.JsonShape;
 import com.ecommerce.payment.support.TestJwt;
+import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -406,27 +409,72 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
 
   // ---- Webhook: missing signature → 401 ----
 
+  /**
+   * A14 / AC-5.3. payment's webhook 401 is a SECOND, deliberately different envelope: the route is
+   * {@code permitAll}, so this 401 is thrown as an {@code ApiException} and rendered through the
+   * converter stack (path B) rather than by the authentication entry point (path A), and its code
+   * is {@code INVALID_WEBHOOK_SIGNATURE} rather than {@code UNAUTHORIZED}.
+   *
+   * <p><b>That difference is deliberate and must NOT be harmonized</b> — a gateway retrying a
+   * webhook needs to distinguish "your signature is wrong" from "your bearer token is wrong", and
+   * they arrive on different mechanisms. The contract row says so in as many words.
+   *
+   * <p>These two rows asserted status + {@code $.error} only until this slice. That is exactly the
+   * shape A3 forbids: it cannot see a fifth key appear, cannot see the message drift, and — the
+   * reason it matters on this endpoint specifically — cannot see the supplied signature being
+   * echoed back into the body. The {@code Content-Type} here is MockMvc's normalised value; the
+   * real per-path wire strings are pinned in {@link ContentTypeWireIntegrationTest}, which is also
+   * where this envelope is shown to render like the converter stack and NOT like the other 401.
+   */
   @Test
-  void webhook_missingSig_returns401() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/v1/payments/webhook")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"event_id\":\"evt_1\",\"event_type\":\"payment_succeeded\"}"))
-        .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.error").value("INVALID_WEBHOOK_SIGNATURE"));
+  void webhook_missingSig_returns401_fullEnvelope() throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments/webhook")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"event_id\":\"evt_1\",\"event_type\":\"payment_succeeded\"}"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(JsonShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("INVALID_WEBHOOK_SIGNATURE");
+    assertThat(JsonPath.<String>read(body, "$.message")).isEqualTo("Missing webhook signature");
+    assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo("/api/v1/payments/webhook");
+    JsonShape.assertIso8601Utc(body, "timestamp");
   }
 
   @Test
-  void webhook_invalidSig_returns401() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/v1/payments/webhook")
-                .header("X-Webhook-Signature", "badhex")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"event_id\":\"evt_2\",\"event_type\":\"payment_succeeded\"}"))
-        .andExpect(status().isUnauthorized())
-        .andExpect(jsonPath("$.error").value("INVALID_WEBHOOK_SIGNATURE"));
+  void webhook_invalidSig_returns401_fullEnvelope_signatureNeverEchoed() throws Exception {
+    String forgedSignature = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments/webhook")
+                    .header("X-Webhook-Signature", forgedSignature)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"event_id\":\"evt_2\",\"event_type\":\"payment_succeeded\"}"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(JsonShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("INVALID_WEBHOOK_SIGNATURE");
+    assertThat(JsonPath.<String>read(body, "$.message"))
+        .isEqualTo("Webhook signature verification failed");
+    assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo("/api/v1/payments/webhook");
+    JsonShape.assertIso8601Utc(body, "timestamp");
+    assertThat(body)
+        .as("the supplied signature must never come back — not even to say it was rejected")
+        .doesNotContain(forgedSignature);
   }
 
   // ---- Webhook: valid signature + known gateway payment id → state transition ----

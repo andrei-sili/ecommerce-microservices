@@ -71,6 +71,21 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
     paymentRepository.deleteAll();
   }
 
+  /**
+   * AC-5.4. The key SET is the primary assertion — {@code failure_reason} ABSENT is what proves
+   * {@code default-property-inclusion: non_null} still applies (B4) — and the VALUES are asserted
+   * beside it, because a key set alone cannot see a field bound to the wrong source.
+   *
+   * <p>Key ORDER is deliberately not asserted. {@code PaymentResponse} is a getter POJO, not a
+   * record, and Jackson 3 enables {@code SORT_PROPERTIES_ALPHABETICALLY} with no creator properties
+   * to keep ahead of it, so this body reorders at 4.1.1 (A18). The set and the values are what the
+   * contract binds.
+   *
+   * <p>The raw-text absences are not redundant with the exact key set: the set covers TOP-LEVEL
+   * keys only, so a camelCase duplicate nested anywhere, or a token leaking inside a string value,
+   * would pass it. {@code payment_method_token} and {@code gateway_payment_id} are the two that
+   * must never reach a client at all.
+   */
   @Test
   void approvedCharge_returns201_exactKeySet_failureReasonAbsent() throws Exception {
     String body = charge("key-shape-201", "pm_valid_token", status().isCreated());
@@ -86,6 +101,21 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
             "gateway",
             "created_at",
             "updated_at");
+
+    assertThat(JsonPath.<Integer>read(body, "$.user_id")).isEqualTo(7);
+    JsonShape.assertJsonNumber(body, "amount", 39.98);
+    assertThat(JsonPath.<String>read(body, "$.currency")).isEqualTo("EUR");
+    assertThat(JsonPath.<String>read(body, "$.status")).isEqualTo("SUCCEEDED");
+    JsonShape.assertIso8601Utc(body, "created_at");
+
+    assertThat(body)
+        .as("snake_case is the REST convention; a camelCase key means the naming strategy moved")
+        .doesNotContain("\"orderId\"")
+        .doesNotContain("\"createdAt\"");
+    assertThat(body)
+        .as("neither the payment-method token nor the gateway id may ever reach a client")
+        .doesNotContain("payment_method_token")
+        .doesNotContain("gateway_payment_id");
   }
 
   @Test
@@ -177,6 +207,100 @@ class PaymentBodyShapeIntegrationTest extends AbstractIntegrationTest {
     assertThat(JsonPath.<String>read(body, "$.message")).isEqualTo("Authentication required");
     assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo(UNKNOWN_PAYMENT_PATH);
     JsonShape.assertIso8601Utc(body, "timestamp");
+  }
+
+  /**
+   * AC-5.5. The INBOUND half of the casing contract: a camelCase body must fail LOUDLY, never bind
+   * by accident. The status and the code are pinned exactly — "some 4xx" would be satisfied by the
+   * 422 an accidental partial bind produces further down the pipeline.
+   *
+   * <p><b>What actually produces this 400, measured rather than assumed.</b> Not unknown-property
+   * rejection: {@code @JsonIgnoreProperties(ignoreUnknown = false)} on {@code CreatePaymentRequest}
+   * is the annotation DEFAULT, which defers to {@code FAIL_ON_UNKNOWN_PROPERTIES} — Boot disables
+   * that and no yml re-enables it. So {@code orderId} and {@code paymentMethodToken} are silently
+   * dropped, {@code orderId} stays null, and {@code @NotNull} is what rejects the request. That
+   * distinction is written down because it decides what a future change may safely rely on: if
+   * unknown-property rejection is ever wanted as a real guarantee, it needs its own criterion AND
+   * its own config, not an annotation that currently means nothing here.
+   */
+  @Test
+  void camelCaseInboundBody_returns400_validationError() throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-camel-inbound")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"orderId":"%s","paymentMethodToken":"pm_valid_token"}
+                        """
+                            .formatted(UUID.randomUUID())))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(JsonShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("VALIDATION_ERROR");
+    assertThat(JsonPath.<String>read(body, "$.path")).isEqualTo("/api/v1/payments");
+    JsonShape.assertIso8601Utc(body, "timestamp");
+    assertThat(paymentRepository.count())
+        .as("a rejected body must not leave a payment behind")
+        .isZero();
+  }
+
+  /**
+   * AC-5.6 / B12, a security invariant rather than a shape one. The four card-data traps on {@code
+   * CreatePaymentRequest} are {@code @Null} fields carrying explicit {@code @JsonProperty} names,
+   * so a raw PAN is REJECTED rather than silently ignored — and the rejection must not hand the PAN
+   * back in the error body, where it would land in every access log between here and the client.
+   *
+   * <p>The trap only fires if {@code @JsonProperty("card_number")} still binds the wire key.
+   * Jackson 2 leaves explicit names alone unless {@code ALLOW_EXPLICIT_PROPERTY_RENAMING} is on;
+   * Jackson 3's behaviour under a naming strategy was unverified before this bump, which is exactly
+   * why this is asserted through the WIRE rather than by reading the annotation. If the name were
+   * re-mangled, {@code card_number} would become an unknown property, be dropped silently, and this
+   * request would be accepted — a 201 here is the regression, not a 500.
+   */
+  @Test
+  void rawCardNumber_returns400_andTheDigitsAreNeverEchoed() throws Exception {
+    String pan = "4111111111111111";
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", USER)
+                    .header("Idempotency-Key", "key-raw-pan")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_valid_token","card_number":"%s"}
+                        """
+                            .formatted(UUID.randomUUID(), pan)))
+            .andExpect(status().isBadRequest())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(JsonShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("VALIDATION_ERROR");
+    assertThat(body)
+        .as("the PAN must never be echoed — not in the message, not in a field list")
+        .doesNotContain(pan);
+    assertThat(body)
+        .as("nor may the trap field names be reflected back")
+        .doesNotContain("pan")
+        .doesNotContain("cvv")
+        .doesNotContain("cvc");
+    assertThat(paymentRepository.count())
+        .as("nothing may be persisted for a body carrying raw card data")
+        .isZero();
   }
 
   private String charge(

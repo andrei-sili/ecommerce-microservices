@@ -1,0 +1,1 @@
+{"amount": 29.50, "status": "FAILED", "userId": 7, "orderId": "9f1c2e7a-1111-2222-3333-444455556666", "currency": "EUR", "paymentId": "c2f80000-1111-2222-3333-444455556666", "occurredAt": "2026-06-26T10:00:00Z", "failureReason": "CARD_DECLINED"}
