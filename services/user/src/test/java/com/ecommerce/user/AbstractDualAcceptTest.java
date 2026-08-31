@@ -18,8 +18,6 @@ import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
 import com.ecommerce.user.support.JwtTestKeys;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
@@ -29,11 +27,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Shared scaffolding for the Slice 5e dual-accept validation suites: exercises the REAL filter
@@ -196,7 +196,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
     Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    body.propertyNames().forEach(keys::add);
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,

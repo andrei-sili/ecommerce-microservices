@@ -15,8 +15,6 @@ import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
 import com.ecommerce.user.security.JwtService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.HashSet;
@@ -26,11 +24,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins the HTTP-level {@code 401} contract of the JWT security filter chain on {@code GET
@@ -163,7 +163,7 @@ class TokenAuth401IntegrationTest extends AbstractIntegrationTest {
     // Exact key-set: the four causes (missing / non-Bearer / malformed / expired) must be
     // indistinguishable — no extension field may leak which one occurred.
     Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    body.propertyNames().forEach(keys::add);
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,

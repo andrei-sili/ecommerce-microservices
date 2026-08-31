@@ -3,8 +3,8 @@ package com.ecommerce.user.support;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.regex.Pattern;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Single source of truth for the wire form of every timestamp this service emits — REST envelope
