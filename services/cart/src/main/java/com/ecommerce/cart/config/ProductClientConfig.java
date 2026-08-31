@@ -2,7 +2,7 @@ package com.ecommerce.cart.config;
 
 import java.time.Duration;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
-import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
+import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -23,8 +23,8 @@ public class ProductClientConfig {
   @Bean
   public RestClient productRestClient(
       RestClient.Builder builder, ProductClientProperties properties) {
-    ClientHttpRequestFactorySettings settings =
-        ClientHttpRequestFactorySettings.defaults()
+    HttpClientSettings settings =
+        HttpClientSettings.defaults()
             .withConnectTimeout(Duration.ofMillis(properties.connectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));
     // clone() so this bean never mutates the shared builder — matching order's and payment's client

@@ -4,6 +4,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -171,10 +172,17 @@ class CartIntegrationTest extends AbstractIntegrationTest {
   // The domain-error rows that follow render through GlobalExceptionHandler.handleApi
   // (ApiException), not through handleExceptionInternal. The substitution probe used to attribute
   // the framework rows — handleExceptionInternal rendering ProblemDetail.forStatus instead of the
-  // envelope — cannot reach handleApi, so it never exercised these rows. Their media type is
-  // therefore unverified in either direction: not shown guarded, not shown unguarded. Settling it
-  // needs a mutation on handleApi itself, with the same paired counterfactual (red on the mutated
-  // rendering, green on the shipped one).
+  // envelope — cannot reach handleApi, so it never exercised these rows, and their media type was
+  // unverified in either direction: not shown guarded, not shown unguarded.
+  //
+  // Settled by mutating handleApi itself to render a ProblemDetail, which is what a converter-stack
+  // regression on this path would look like. With the exact media-type guards below in place every
+  // one of these rows goes red naming application/problem+json; with the guards removed the same
+  // mutation leaves them green, because a ProblemDetail still carries the machine code these rows
+  // read by jsonPath. That paired counterfactual is the reason the guard is a line of its own
+  // rather than a byproduct of the body assertion — and the reason it runs BEFORE the body: every
+  // way this path drifts also destroys the body, so a leading jsonPath reports "No value at JSON
+  // path" and points the reader at the wrong cause.
   @Test
   void addingDifferentCurrency_returns422() throws Exception {
     mockMvc
@@ -191,6 +199,7 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":50,\"quantity\":1}"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("MIXED_CURRENCY_CART"));
   }
 
@@ -210,6 +219,7 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":50}"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("QUANTITY_LIMIT_EXCEEDED"));
   }
 
@@ -222,6 +232,7 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":60,\"quantity\":1}"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("PRODUCT_UNAVAILABLE"));
   }
 
@@ -234,6 +245,7 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":9999,\"quantity\":1}"))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("PRODUCT_NOT_FOUND"));
   }
 
@@ -246,6 +258,7 @@ class CartIntegrationTest extends AbstractIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":2}"))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("CART_ITEM_NOT_FOUND"));
   }
 
