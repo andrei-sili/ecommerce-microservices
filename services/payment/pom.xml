@@ -44,8 +44,14 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
-    <!-- Boot 4 loads auto-configuration per declared starter; the RestClientCustomizer in
-         ClientsConfig must not rely on transitive inclusion. -->
+    <!-- Required to COMPILE, not a precaution. This starter is the only thing on the tree that
+         provides org.springframework.boot.restclient and org.springframework.boot.http.client,
+         and ClientsConfig imports both (RestClientCustomizer, HttpClientSettings) — Boot 4 moved
+         them out of the modules starter-web pulls in. Removing it does not degrade behaviour, it
+         fails the build:
+           ClientsConfig.java:[5,44] package org.springframework.boot.http.client does not exist
+           ClientsConfig.java:[7,43] package org.springframework.boot.restclient does not exist
+         Compile scope because ClientsConfig is src/main. -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-restclient</artifactId>
