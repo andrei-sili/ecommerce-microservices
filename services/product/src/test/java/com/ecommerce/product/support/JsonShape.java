@@ -2,10 +2,10 @@ package com.ecommerce.product.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Wire-shape assertions: the exact key set of a JSON object and the format of its date fields.
@@ -30,7 +30,7 @@ public final class JsonShape {
     assertThat(object).isNotNull();
     assertThat(object.isObject()).as("expected a JSON object, was: %s", object).isTrue();
     List<String> keys = new ArrayList<>();
-    object.fieldNames().forEachRemaining(keys::add);
+    object.propertyNames().forEach(keys::add);
     return keys;
   }
 

@@ -9,9 +9,10 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -29,12 +30,17 @@ import org.testcontainers.containers.PostgreSQLContainer;
  *
  * <p>Runs against a real embedded Tomcat ({@code RANDOM_PORT}) + real Postgres so the full Spring
  * Security filter chain and the {@code WebMvcMetricsFilter} are exercised end-to-end, not mocked.
- * {@link AutoConfigureObservability} is required because {@code @SpringBootTest} disables the
- * metrics registry by default, which would otherwise leave {@code /actuator/prometheus}
- * unregistered.
+ * {@link AutoConfigureMetrics} is required because {@code @SpringBootTest} disables the metrics
+ * registry by default, which would otherwise leave {@code /actuator/prometheus} unregistered.
+ *
+ * <p>{@link AutoConfigureTestRestTemplate} is required from Boot 4: {@code RANDOM_PORT} alone no
+ * longer registers a {@code TestRestTemplate} bean, so without it the injection below fails the
+ * context outright. Loud, but not obvious — the capability moved into {@code
+ * spring-boot-resttestclient} along with the type itself and must now be asked for by name.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureObservability(tracing = false)
+@AutoConfigureMetrics
+@AutoConfigureTestRestTemplate
 class PrometheusMetricsIT {
 
   private static final String PROMETHEUS_PATH = "/actuator/prometheus";

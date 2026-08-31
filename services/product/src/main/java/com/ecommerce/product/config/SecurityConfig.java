@@ -5,7 +5,6 @@ import com.ecommerce.product.security.JwtAuthenticationFilter;
 import com.ecommerce.product.security.JwtService;
 import com.ecommerce.product.security.RestAccessDeniedHandler;
 import com.ecommerce.product.security.RestAuthenticationEntryPoint;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,6 +15,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.util.StringUtils;
+import tools.jackson.databind.ObjectMapper;
 
 @Configuration
 public class SecurityConfig {

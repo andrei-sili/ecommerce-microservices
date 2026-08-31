@@ -1,5 +1,6 @@
 package com.ecommerce.product;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -13,10 +14,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.product.exception.ApiException;
+import com.ecommerce.product.exception.GlobalExceptionHandler;
+import com.ecommerce.product.exception.ProductScopedException;
 import com.ecommerce.product.support.AbstractIntegrationTest;
 import com.ecommerce.product.support.TestJwt;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -24,6 +32,9 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
  * Full-context guard for framework/dispatcher error mapping: unmapped path, wrong method, bad media
@@ -247,6 +258,72 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             delete("/api/v1/inventory/reservations/" + UUID.randomUUID())
                 .header("X-Internal-Api-Key", INTERNAL_API_KEY))
         .andExpect(status().isNoContent());
+  }
+
+  /**
+   * A10, structural half. The catch-all {@code @ExceptionHandler(Exception.class)} must stay the
+   * only 500 producer, and no standalone handler may declare a type the {@link
+   * ResponseEntityExceptionHandler} base class already maps — that collision is a STARTUP crash
+   * ("Ambiguous @ExceptionHandler"), not a test failure, so it takes the service down rather than
+   * reddening a row.
+   *
+   * <p>The base-mapped set is read reflectively from the framework on the classpath instead of
+   * being hard-coded, so this goes red if a future Spring version ADDS a mapping that collides with
+   * one of ours. Today only SUPERtypes are base-mapped — {@code
+   * MethodArgumentTypeMismatchException} sits under {@code TypeMismatchException} — which is
+   * exactly why our standalone handler for the subtype is legal, and exactly what a base-class
+   * change could silently invalidate.
+   *
+   * <p><b>The standalone set is pinned EXACTLY, not by {@code contains}.</b> A subset assertion
+   * discharges the "no ambiguity" half but not the "single 500 producer" half: a brand-new
+   * {@code @ExceptionHandler} returning 500 satisfies {@code contains(Exception.class)} while
+   * adding the second producer the row forbids.
+   *
+   * <p><b>"Only 500" is narrower than "only 5xx", and on product the gap is occupied.</b> {@link
+   * GlobalExceptionHandler#handleApi} renders {@code ex.getStatus()} and {@code
+   * ProductScopedException} carries its own, so a standalone handler here can emit any status its
+   * exception names. The row's letter is intact — the catch-all remains the only producer of 500 —
+   * and the assertion message should be read as written: a new standalone handler is a candidate
+   * second 500 producer, not a claim that no standalone handler may be 5xx.
+   *
+   * <p>Scope, so a green is not read louder than it earns. This pins WHICH types get a standalone
+   * handler; it never executes them, so it cannot see one of the three non-catch-all handlers being
+   * changed to render 500. Those statuses are held by the behavioural rows in this class and in
+   * {@code ErrorEnvelopePinIT} / {@code ReservationIT}.
+   */
+  @Test
+  void noStandaloneHandlerIsAmbiguousWithTheBaseClass_andTheCatchAllIsTheOnly500() {
+    Set<Class<?>> baseMapped = mappedTypes(ResponseEntityExceptionHandler.class);
+    Set<Class<?>> standalone = mappedTypes(GlobalExceptionHandler.class);
+
+    // Both halves of the reflection must actually have found something: an empty set would make
+    // doesNotContainAnyElementsOf trivially true and this whole row vacuous.
+    assertThat(baseMapped).as("reflection must actually find the base mappings").isNotEmpty();
+    assertThat(standalone).as("reflection must actually find our handlers").isNotEmpty();
+
+    assertThat(standalone)
+        .as(
+            "a standalone @ExceptionHandler declaring a type the base class already maps is an"
+                + " ambiguous mapping and fails startup")
+        .doesNotContainAnyElementsOf(baseMapped);
+
+    assertThat(standalone)
+        .as(
+            "the catch-all must remain, and remain the ONLY standalone handler — a new one here is"
+                + " a candidate second 500 producer and must be justified, not absorbed")
+        .containsExactlyInAnyOrder(
+            ProductScopedException.class,
+            ApiException.class,
+            MethodArgumentTypeMismatchException.class,
+            Exception.class);
+  }
+
+  private static Set<Class<?>> mappedTypes(Class<?> handler) {
+    return Arrays.stream(handler.getDeclaredMethods())
+        .map(m -> m.getAnnotation(ExceptionHandler.class))
+        .filter(Objects::nonNull)
+        .flatMap(a -> Arrays.stream(a.value()))
+        .collect(Collectors.toSet());
   }
 
   /** No error body may leak the static-resource message, a stack trace or other internals. */
