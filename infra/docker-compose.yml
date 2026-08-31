@@ -7,9 +7,11 @@
 # Published host ports: Kong :8000, RabbitMQ UI :15672. Dev-only direct port access lives in the
 # gitignored docker-compose.override.yml (auto-loaded when no -f is passed).
 #
-# Wave 3 — RabbitMQ broker + Payment + Notification. Topology (exchanges/queues/DLQs) is
-# declared idempotently by each service at startup (Spring AMQP / aio-pika). No pre-loaded
-# definitions file — RabbitMQ boots with RABBITMQ_DEFAULT_USER/PASS and services handle the rest.
+# Wave 3 — RabbitMQ broker + Payment + Notification. Service topology (exchanges/queues/DLQs) is
+# declared idempotently by each service at startup (Spring AMQP / aio-pika); RabbitMQ still boots
+# with RABBITMQ_DEFAULT_USER/PASS. The one thing NOT declared by a service is the read-only spy
+# topology in rabbitmq/definitions.json, applied by the one-shot rabbitmq-spy-topology service
+# once the broker is healthy — see infra/rabbitmq/README.md.
 
 name: ecommerce
 
@@ -293,9 +295,10 @@ services:
       # `ping` only answers for the Erlang node, NOT the `rabbit` application: a node that
       # terminates during boot (bad definitions file, corrupt schema) keeps answering
       # "Ping succeeded" while serving nothing, so every downstream depends_on:service_healthy
-      # passes against a dead broker. Measured, not theorised: a boot-time definitions file
-      # missing its vhost crash-looped this container, and `ping` returned success 5/5 while
-      # compose called it Healthy and started notification-service against it.
+      # passes against a dead broker. Measured, not theorised, while building the spy topology:
+      # a boot-time definitions file missing its vhost crash-looped this container, and `ping`
+      # returned success 5/5 while compose called it Healthy and started notification-service
+      # against it. That config never shipped, but the blind spot it exposed was already here.
       # `check_running` asserts the application is up, which is what the dependents actually
       # need -- and is what the K8s readinessProbe in k8s/base/rabbitmq/ already used.
       # The timeout goes to 10s with it: check_running does real work where ping does not.
@@ -304,6 +307,58 @@ services:
       timeout: 10s
       retries: 10
       start_period: 30s
+
+  # Applies the read-only spy topology (contract row INFRA-spy) and exits. One-shot, not a
+  # long-running piece of infrastructure, and it reuses the broker image already pulled above.
+  #
+  # Why AFTER boot and not the broker's own `load_definitions`: boot-time import makes RabbitMQ
+  # skip seeding the default user entirely -- measured, and the broker says so itself
+  # ("Will not seed default virtual host and user: have definitions to load"). The node then has
+  # ZERO users, every service gets 401, and nothing declares its topology. The only way to keep
+  # boot-time import is to put a user in definitions.json, which carries a password_hash into a
+  # public repo. Not an option, so the same versioned file is applied here instead.
+  #
+  # No app service depends on this one: the spy is a test affordance and must never gate the
+  # stack coming up. That leaves a window between the broker going healthy and the import
+  # landing, in which a relay can publish an event the spy has no queue for yet.
+  #
+  # The window reopens whenever the BROKER's state is reset independently of the service
+  # databases, which is a normal operation rather than an exotic one: rabbitmq-data is one of
+  # seven independent named volumes below, a sibling of the six service DB volumes, so
+  # `docker volume rm ecommerce_rabbitmq-data` -- the ordinary reflex for a bad broker state --
+  # destroys the spy queues while leaving all six service DBs intact, outbox rows included.
+  #
+  # It is quiet rather than obvious because of an asymmetry, measured and not assumed: the
+  # SERVICE topology self-heals (clients re-declare on reconnect) and the spy does NOT, since
+  # this container has already exited and nothing re-runs a one-shot. Delete both queues,
+  # restart only the broker, and notification's queue returns by itself while spy.order-placed
+  # stays gone -- so the next probe is silently EMPTY, green because it measured nothing.
+  # Recovery: `docker compose up -d rabbitmq-spy-topology`. See infra/rabbitmq/README.md.
+  rabbitmq-spy-topology:
+    image: rabbitmq:3-management-alpine
+    container_name: ecommerce-rabbitmq-spy-topology
+    restart: "no"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RABBITMQ_USER: ${RABBITMQ_USER}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    volumes:
+      - ./rabbitmq/definitions.json:/definitions.json:ro
+    networks:
+      - ecommerce-net
+    # $$ escapes Compose interpolation so the shell expands these at runtime, which keeps the
+    # password out of the committed argv and out of `docker inspect .Config.Cmd` -- the rendered
+    # command stays literally "$RABBITMQ_PASSWORD". It does NOT keep it out of
+    # `docker compose config`, which prints the value anyway from the environment: block two
+    # lines above (and from four other services that take the same variable).
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        rabbitmqadmin --host rabbitmq --port 15672
+        --username "$$RABBITMQ_USER" --password "$$RABBITMQ_PASSWORD"
+        import /definitions.json
 
   payment-service:
     build:
