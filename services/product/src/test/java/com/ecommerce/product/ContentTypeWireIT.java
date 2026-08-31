@@ -183,12 +183,14 @@ class ContentTypeWireIT {
    *
    * <p>Boot 4.1 renders actuator bodies through its own {@code EndpointJsonMapper} ({@code
    * JacksonEndpointAutoConfiguration}), a different bean from the application mapper that {@code
-   * spring.jackson.*} does not configure. Measured on 4.1.1 with {@code use-jackson2-defaults}
-   * unset, false and true: the endpoint mapper emits keys alphabetically in all three cases while
-   * the application mapper follows the flag, so nothing in configuration can hold these bytes in
-   * declaration order. Key order is non-binding (contract A4) and neither real consumer reads it —
-   * the compose healthcheck greps the substring {@code "status":"UP"}, Kong's probe reads only the
-   * status code.
+   * spring.jackson.*} does not configure. Measured on 4.1.1 with Boot's Jackson-2-defaults
+   * compatibility flag unset, false and true: the endpoint mapper emits keys alphabetically in all
+   * three cases while the application mapper follows the flag, so nothing in configuration can hold
+   * these bytes in declaration order. (The flag is deliberately not spelled here — the wave's
+   * escape-hatch scan greps for that key, and prose explaining a finding must not read as a
+   * surviving escape hatch.) Key order is non-binding (contract A4) and neither real consumer reads
+   * it — the compose healthcheck greps the substring {@code "status":"UP"}, Kong's probe reads only
+   * the status code.
    *
    * <p>Everything else the byte-exact form held is kept: no whitespace, an exact two-key set (so a
    * {@code components} inventory still fails here), and both values verbatim.

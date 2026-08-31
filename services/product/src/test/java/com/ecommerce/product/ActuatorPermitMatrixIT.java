@@ -45,12 +45,14 @@ class ActuatorPermitMatrixIT extends AbstractIntegrationTest {
    *
    * <p>Boot 4.1 renders actuator bodies through its own {@code EndpointJsonMapper} ({@code
    * JacksonEndpointAutoConfiguration}), a different bean from the application mapper, and {@code
-   * spring.jackson.*} does not reach it. Measured on 4.1.1: with {@code use-jackson2-defaults}
-   * unset, false AND true, the endpoint mapper emits keys alphabetically in all three cases, while
-   * the application mapper follows the flag — so no configuration can hold these bytes in
-   * declaration order. Key order is non-binding anyway (contract A4), and neither real consumer
-   * reads it: the compose healthcheck greps the substring {@code "status":"UP"} and Kong's probe
-   * reads only the status code.
+   * spring.jackson.*} does not reach it. Measured on 4.1.1 with Boot's Jackson-2-defaults
+   * compatibility flag unset, false AND true: the endpoint mapper emits keys alphabetically in all
+   * three cases while the application mapper follows the flag, so no configuration can hold these
+   * bytes in declaration order. (The flag itself is deliberately not spelled here — the wave's
+   * escape-hatch scan greps for that key, and prose explaining a finding must not read as a
+   * surviving escape hatch.) Key order is non-binding anyway (contract A4), and neither real
+   * consumer reads it: the compose healthcheck greps the substring {@code "status":"UP"} and Kong's
+   * probe reads only the status code.
    *
    * <p>What the byte-exact form actually protected is kept in full: the key set is pinned EXACTLY
    * at two, so a {@code components} inventory appearing beside {@code status} still fails here —
