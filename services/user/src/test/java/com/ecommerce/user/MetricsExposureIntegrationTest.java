@@ -10,8 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -20,10 +20,13 @@ import org.springframework.test.web.servlet.MockMvc;
  * and the metrics endpoint stays outside the {@code /api/v1} business namespace. Runs against the
  * real security chain + dispatcher + Postgres.
  *
- * <p>{@code @AutoConfigureObservability} is required and stays: Spring Boot's test customizer
- * otherwise forces {@code management.defaults.metrics.export.enabled=false} and the endpoint
- * disappears. That is a test-harness default being switched off, not a production value being
- * replayed.
+ * <p>{@code @AutoConfigureMetrics} is required and stays: Spring Boot's test customizer otherwise
+ * forces {@code management.defaults.metrics.export.enabled=false} and the endpoint disappears. That
+ * is a test-harness default being switched off, not a production value being replayed. (It was
+ * {@code @AutoConfigureObservability} until Boot 4 split the test slices into per-technology
+ * modules; the replacement lives in {@code spring-boot-micrometer-metrics-test}. Deleting the
+ * unresolved import instead of following the move leaves a compiling class asserting against a
+ * non-exporting registry — green, and proving nothing.)
  *
  * <p>The exposure list is a production value and is therefore <strong>not</strong> replayed here
  * any more. Until the S-shadow slice this class carried {@code @TestPropertySource(properties =
@@ -35,7 +38,7 @@ import org.springframework.test.web.servlet.MockMvc;
  * row below red. Do not reintroduce a {@code management.endpoints.*} property here.
  */
 @AutoConfigureMockMvc
-@AutoConfigureObservability
+@AutoConfigureMetrics
 class MetricsExposureIntegrationTest extends AbstractIntegrationTest {
 
   private static final String METRICS_PATH = "/actuator/prometheus";

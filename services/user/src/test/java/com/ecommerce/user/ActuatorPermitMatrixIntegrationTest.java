@@ -10,7 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -69,7 +70,25 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
    * readiness group make Boot render {@code SystemHealth}, whose {@code groups} member is not gated
    * by {@code show-details} — measured, not assumed. Neither real consumer is affected (the compose
    * healthcheck greps the substring {@code "status":"UP"}, Kong reads only the status code), but
-   * the byte-exact form is what makes an added {@code components} key visible here.
+   * the exact key set is what makes an added {@code components} key visible here.
+   *
+   * <p><strong>Asserted key-wise rather than byte-wise, and only on ordering.</strong> This row was
+   * {@code content().string(...)} until the Boot 4.1 bump. Boot 4.1 renders actuator bodies through
+   * its own {@code EndpointJsonMapper} ({@code JacksonEndpointAutoConfiguration}), a different bean
+   * from the application mapper, which no {@code spring.jackson.*} or {@code management.*} property
+   * configures — so the two keys come out alphabetically and nothing in configuration can hold them
+   * in declaration order. Measured here rather than inferred: at the FREEZE commit, with Boot's
+   * Jackson-2-defaults compatibility flag ON and every other body in the suite unmoved, this was
+   * one of exactly two failures fleet-shaped like each other, both on this same body: {@code
+   * expected:<{"status":"UP",...}> but was:<{"groups":[...],"status":"UP"}>}.
+   *
+   * <p>Key order is non-binding (contract A4), so the new order is deliberately
+   * <strong>not</strong> re-pinned — doing so would re-break on the next Boot patch for no
+   * contractual reason. What the byte-exact form actually protected is kept whole: {@link
+   * JsonCompareMode#STRICT} fails on an extra key, so a {@code components} inventory appearing
+   * beside {@code status} still reddens this row. Do not "tidy" this to the one-argument {@code
+   * json(String)} overload — that one is LENIENT and would pass straight through the disclosure
+   * this row exists to catch.
    */
   @Test
   void health_withoutToken_returns200_withExactRenderedBody() throws Exception {
@@ -77,7 +96,11 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
+        .andExpect(
+            content()
+                .json(
+                    "{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}",
+                    JsonCompareMode.STRICT));
   }
 
   @Test

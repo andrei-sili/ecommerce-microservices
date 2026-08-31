@@ -8,10 +8,15 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins what only a real servlet container can show: the {@code Content-Type} bytes that actually go
@@ -73,6 +78,9 @@ class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
 
   @LocalServerPort private int port;
 
+  /** Used only to PARSE the actuator body; the body itself is rendered by a different mapper. */
+  @Autowired private ObjectMapper objectMapper;
+
   private final HttpClient http = HttpClient.newHttpClient();
 
   @Test
@@ -125,13 +133,35 @@ class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
    * {@code application.yml} shadowed the shipped file — so the sentence above described an intent
    * the code did not implement. The values now come from {@code
    * src/main/resources/application.yml}; do not reintroduce the replay.
+   *
+   * <p><strong>The root body is pinned key-wise rather than byte-wise, and only on
+   * ordering.</strong> Boot 4.1 renders actuator bodies through its own {@code EndpointJsonMapper}
+   * ({@code JacksonEndpointAutoConfiguration}), a different bean from the application mapper, which
+   * no {@code spring.jackson.*} or {@code management.*} property configures — so its two keys come
+   * out alphabetically and no configuration can hold them in declaration order. Measured on this
+   * branch rather than inferred: at the FREEZE commit, with Boot's Jackson-2-defaults compatibility
+   * flag ON and all 126 other executions unmoved, this row and its MockMvc twin were the only two
+   * failures, both {@code expected:<{"status":"UP",...}> but was:<{"groups":[...],"status":"UP"}>}.
+   * Key order is non-binding (contract A4) and the new order is deliberately NOT re-pinned.
+   * Everything the byte-exact form protected survives: no whitespace, an exact two-key set — so a
+   * {@code components} inventory still reddens this row — and both values verbatim. The three
+   * single-key/empty bodies below stay byte-exact, because no reordering can move them.
    */
   @Test
   void shippedActuatorBodies_onRealTomcat_matchTheMockMvcPins() throws Exception {
     HttpResponse<String> root = get("/actuator/health", null);
     assertEquals(200, root.statusCode());
     assertWireContentType(ACTUATOR_WIRE_CONTENT_TYPE, root, "actuator root");
-    assertEquals("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}", root.body());
+
+    String body = root.body();
+    assertFalse(
+        body.contains(" ") || body.contains("\n"), "root body must stay unindented: " + body);
+    JsonNode health = objectMapper.readTree(body);
+    Set<String> keys = new HashSet<>();
+    health.propertyNames().forEach(keys::add);
+    assertEquals(Set.of("status", "groups"), keys, "root health body key set: " + body);
+    assertEquals("UP", health.get("status").asString());
+    assertEquals("[\"liveness\",\"readiness\"]", health.get("groups").toString());
 
     assertEquals("{\"status\":\"UP\"}", get("/actuator/health/readiness", null).body());
     assertEquals("{\"status\":\"UP\"}", get("/actuator/health/liveness", null).body());

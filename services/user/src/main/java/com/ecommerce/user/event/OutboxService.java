@@ -2,11 +2,10 @@ package com.ecommerce.user.event;
 
 import com.ecommerce.user.model.OutboxEvent;
 import com.ecommerce.user.repository.OutboxEventRepository;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Records domain events in the transactional outbox. Wave 1 only persists them; the RabbitMQ relay
@@ -20,11 +19,14 @@ public class OutboxService {
   private final OutboxEventRepository repository;
   // Dedicated mapper: the event contract uses camelCase field names (userId, occurredAt),
   // independent of the API's snake_case JSON convention.
+  //
+  // The disable() stays EXPLICIT even though Jackson 3 already defaults it off (contract B7): this
+  // mapper exists precisely to be independent of framework defaults, and leaning on an upstream
+  // default for a contract-binding representation is not a pin. JavaTimeModule is gone because
+  // Jackson 3 registers java.time support itself; keeping it would be a second registration of the
+  // same serializers, not a safety net.
   private final JsonMapper mapper =
-      JsonMapper.builder()
-          .addModule(new JavaTimeModule())
-          .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .build();
+      JsonMapper.builder().disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS).build();
 
   public OutboxService(OutboxEventRepository repository) {
     this.repository = repository;

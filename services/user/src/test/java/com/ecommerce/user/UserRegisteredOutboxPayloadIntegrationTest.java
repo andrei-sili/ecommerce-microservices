@@ -11,18 +11,18 @@ import com.ecommerce.user.model.OutboxEvent;
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins the {@code UserRegistered} outbox payload: exactly {@code {userId, email, occurredAt}}, in
@@ -62,7 +62,7 @@ class UserRegisteredOutboxPayloadIntegrationTest extends AbstractIntegrationTest
     JsonNode payload = payloadOf(singleEvent());
 
     Set<String> keys = new HashSet<>();
-    payload.fieldNames().forEachRemaining(keys::add);
+    payload.propertyNames().forEach(keys::add);
     assertEquals(
         Set.of("userId", "email", "occurredAt"),
         keys,

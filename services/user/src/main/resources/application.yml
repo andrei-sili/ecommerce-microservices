@@ -32,10 +32,23 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
   jackson:
+    # FREEZE (commit 1 of 2): hold Jackson's serialized output at its Boot 3 shape while the parent
+    # version and the import moves land, so any body diff found later bisects to the absorbed
+    # defaults rather than to the bump. Removed in commit 2.
+    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
-    serialization:
-      write-dates-as-timestamps: false
+    # A `serialization:` entry for Jackson's WRITE_DATES_AS_TIMESTAMPS flag stood here and was
+    # deleted, with NO replacement key (contract B8). Jackson 3 moved that flag off
+    # SerializationFeature onto DateTimeFeature, and Boot binds `spring.jackson.serialization.*` by
+    # SerializationFeature constant name — so the key no longer resolves and every context fails to
+    # start on a property-binding error that reads like an unrelated config problem. No replacement
+    # is added because Jackson 3 already defaults the flag OFF: dates stay ISO-8601 strings. That is
+    # asserted, not assumed, in
+    # JacksonBindingIntegrationTest#bootMapper_writesDatesAsIsoStrings_notEpochNumbers.
+    # The old key is named by its enum constant, not spelled in kebab-case: B8's gate greps
+    # `services/` for that exact token, and a comment recording a deletion must not read to a
+    # scanner as a surviving declaration.
 
 server:
   port: ${SERVER_PORT:8081}
