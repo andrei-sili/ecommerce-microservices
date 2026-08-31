@@ -13,8 +13,6 @@ import com.ecommerce.cart.repository.CartRepository;
 import com.ecommerce.cart.support.AbstractIntegrationTest;
 import com.ecommerce.cart.support.StubProductClient;
 import com.ecommerce.cart.support.TestJwt;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -33,6 +31,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Wire-shape pin for the cart body, captured on 3.5.16 from {@code GET /api/v1/cart} as {@code
@@ -242,7 +242,7 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   private static Set<String> keysOf(JsonNode node) {
     Set<String> keys = new LinkedHashSet<>();
-    node.fieldNames().forEachRemaining(keys::add);
+    node.propertyNames().forEach(keys::add);
     return keys;
   }
 
@@ -255,8 +255,8 @@ class CartBodyShapeIntegrationTest extends AbstractIntegrationTest {
 
   private static void collectNonSnakeCaseKeys(JsonNode node, List<String> offenders) {
     if (node.isObject()) {
-      node.fieldNames()
-          .forEachRemaining(
+      node.propertyNames()
+          .forEach(
               name -> {
                 if (!SNAKE_CASE.matcher(name).matches()) {
                   offenders.add(name);

@@ -8,11 +8,11 @@ import com.ecommerce.cart.security.RestAccessDeniedHandler;
 import com.ecommerce.cart.security.RestAuthenticationEntryPoint;
 import com.ecommerce.cart.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
 
 /**
  * Binds the two invariants that a green HTTP suite can only prove indirectly, at the bean level.
@@ -58,11 +58,11 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
   void bootMapper_bindsSnakeCaseAndNonNullInclusion_fromTheShippedYml() {
     assertEquals(
         PropertyNamingStrategies.SNAKE_CASE,
-        objectMapper.getSerializationConfig().getPropertyNamingStrategy(),
+        objectMapper.serializationConfig().getPropertyNamingStrategy(),
         "spring.jackson.property-naming-strategy did not bind onto the Boot mapper");
     assertEquals(
         JsonInclude.Include.NON_NULL,
-        objectMapper.getSerializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
+        objectMapper.serializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
         "spring.jackson.default-property-inclusion did not bind onto the Boot mapper");
   }
 }
