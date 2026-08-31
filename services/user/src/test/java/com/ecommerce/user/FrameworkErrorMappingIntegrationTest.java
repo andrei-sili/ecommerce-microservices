@@ -1,6 +1,7 @@
 package com.ecommerce.user;
 
 import static com.ecommerce.user.support.ErrorEnvelopes.assertJsonNotProblem;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.is;
@@ -16,10 +17,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.user.exception.ApiException;
+import com.ecommerce.user.exception.GlobalExceptionHandler;
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
 import java.net.URI;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +36,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.ResultMatcher;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -247,6 +256,61 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
             .andExpect(status().isUnauthorized()),
         jsonPath("$.error", is("UNAUTHORIZED")),
         jsonPath("$.path", is("/api/v1/users/%C3%A9lise/me")));
+  }
+
+  /**
+   * 12. A10, structural half. The catch-all {@code @ExceptionHandler(Exception.class)} must stay
+   * the only 500 producer, and no standalone handler may declare a type the {@link
+   * ResponseEntityExceptionHandler} base class already maps — that collision is a STARTUP crash
+   * ("Ambiguous @ExceptionHandler"), not a test failure, so it takes the service down rather than
+   * reddening a row. On the fleet's only JWT signer that is the difference between a bad deploy and
+   * a service that never comes up at all.
+   *
+   * <p>The base-mapped set is read reflectively from the framework on the classpath rather than
+   * hard-coded, so this goes red if a future Spring version ADDS a mapping that collides with one
+   * of ours — which is the whole reason the row exists during a framework major bump. Both halves
+   * of the reflection are asserted non-empty first: an empty set would make {@code
+   * doesNotContainAnyElementsOf} trivially true and this row vacuous.
+   *
+   * <p><b>The standalone set is pinned EXACTLY, not by {@code contains}.</b> A subset assertion
+   * discharges the "no ambiguity" half but not the "single 500 producer" half: a brand-new
+   * {@code @ExceptionHandler} returning 500 satisfies {@code contains(Exception.class)} while
+   * adding the second producer the row forbids. user is the fleet's smallest standalone set — two
+   * entries, where product has four — because every framework type is customised through an
+   * {@code @Override} of a protected hook instead.
+   *
+   * <p>Scope, so a green is not read louder than it earns. This pins WHICH types get a standalone
+   * handler; it never executes them, so it cannot see {@code handleApi} being changed to render
+   * 500. That status is held by the behavioural rows above and in {@code
+   * TokenAuth401IntegrationTest}.
+   */
+  @Test
+  void noStandaloneHandlerIsAmbiguousWithTheBaseClass_andTheCatchAllIsTheOnly500() {
+    Set<Class<?>> baseMapped = mappedTypes(ResponseEntityExceptionHandler.class);
+    Set<Class<?>> standalone = mappedTypes(GlobalExceptionHandler.class);
+
+    assertThat(baseMapped).as("reflection must actually find the base mappings").isNotEmpty();
+    assertThat(standalone).as("reflection must actually find our handlers").isNotEmpty();
+
+    assertThat(standalone)
+        .as(
+            "a standalone @ExceptionHandler declaring a type the base class already maps is an"
+                + " ambiguous mapping and fails startup")
+        .doesNotContainAnyElementsOf(baseMapped);
+
+    assertThat(standalone)
+        .as(
+            "the catch-all must remain, and remain one of only two standalone handlers — a new one"
+                + " here is a candidate second 500 producer and must be justified, not absorbed")
+        .containsExactlyInAnyOrder(ApiException.class, Exception.class);
+  }
+
+  private static Set<Class<?>> mappedTypes(Class<?> handler) {
+    return Arrays.stream(handler.getDeclaredMethods())
+        .map(m -> m.getAnnotation(ExceptionHandler.class))
+        .filter(Objects::nonNull)
+        .flatMap(a -> Arrays.stream(a.value()))
+        .collect(Collectors.toSet());
   }
 
   /**

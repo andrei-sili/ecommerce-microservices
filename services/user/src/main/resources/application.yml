@@ -32,10 +32,6 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
   jackson:
-    # FREEZE (commit 1 of 2): hold Jackson's serialized output at its Boot 3 shape while the parent
-    # version and the import moves land, so any body diff found later bisects to the absorbed
-    # defaults rather than to the bump. Removed in commit 2.
-    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
     # A `serialization:` entry for Jackson's WRITE_DATES_AS_TIMESTAMPS flag stood here and was
