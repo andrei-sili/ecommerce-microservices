@@ -146,6 +146,27 @@ class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
    * Everything the byte-exact form protected survives: no whitespace, an exact two-key set — so a
    * {@code components} inventory still reddens this row — and both values verbatim. The three
    * single-key/empty bodies below stay byte-exact, because no reordering can move them.
+   *
+   * <p><strong>The two-key claim is measured, not reasoned</strong> — it describes an assertion
+   * this slice deliberately weakened. Probed at {@code a9b82af} by adding {@code show-details:
+   * always} to the SHIPPED yml (the disclosure this row guards, not an arbitrary edit), {@code
+   * ./mvnw -B -ntp clean verify} at full suite scope: 4 of 138 red, this row among them, {@code
+   * expected: <[groups, status]> but was: <[components, groups, status]>}.
+   *
+   * <p>What that mutation exposes on the wire, recorded because this row's failure message is the
+   * only place in the suite it is legible: the inventory carries {@code db} ({@code database:
+   * "PostgreSQL"}, {@code validationQuery: "isValid()"}), {@code diskSpace} with {@code total} /
+   * {@code free} / {@code threshold} and the server's <em>absolute path on the host
+   * filesystem</em>, {@code ssl} chain state, {@code ping}, {@code livenessState} and {@code
+   * readinessState} — all unauthenticated, on the pod network, from the fleet's RS256 signer.
+   *
+   * <p><strong>That is a difference in failure OUTPUT, not in reach.</strong> This row and its
+   * MockMvc twin hit the same endpoint and detect the same regression; the twin simply reports it
+   * as {@code Unexpected: components}, because JSONAssert names the offending key while the key-set
+   * assertion here embeds the whole body in its message. Do not read this paragraph as an argument
+   * that the MockMvc row is weaker — it is not, and deleting either one on that reasoning would
+   * lose a genuinely independent observer (normalised MockMvc value vs the bytes Tomcat actually
+   * wrote).
    */
   @Test
   void shippedActuatorBodies_onRealTomcat_matchTheMockMvcPins() throws Exception {

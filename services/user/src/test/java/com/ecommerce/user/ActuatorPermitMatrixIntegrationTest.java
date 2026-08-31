@@ -27,9 +27,12 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>The bodies are asserted whole, not through {@code $.status}. A subset assertion cannot see the
  * disclosure this pin exists to prevent: {@code management.endpoint.health.show-details} is set
  * nowhere in this repo, so production runs the framework default {@code never}; if that default
- * flips, {@code components} appears and the DB product, version and host disk paths go to any
- * unauthenticated caller on the pod network — while {@code $.status} stays {@code "UP"} and stays
- * green.
+ * flips, {@code components} appears and goes to any unauthenticated caller on the pod network —
+ * while {@code $.status} stays {@code "UP"} and stays green. Measured at {@code a9b82af} rather
+ * than described in the abstract: the leaked inventory is {@code database: "PostgreSQL"}, {@code
+ * validationQuery: "isValid()"}, SSL chain state, disk totals and the server's absolute host
+ * filesystem path. See {@link #health_withoutToken_returns200_withExactRenderedBody()} for the
+ * probe and its exact failure text.
  *
  * <p><strong>These bodies ARE read from the shipped yml — that half was closed by the S-shadow
  * slice.</strong> This class used to carry a {@code @TestPropertySource} replaying {@code
@@ -89,6 +92,36 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
    * beside {@code status} still reddens this row. Do not "tidy" this to the one-argument {@code
    * json(String)} overload — that one is LENIENT and would pass straight through the disclosure
    * this row exists to catch.
+   *
+   * <p><strong>That last claim is measured, not reasoned.</strong> It is a claim about an assertion
+   * this slice deliberately weakened, so it does not get to rest on argument. Probed at {@code
+   * a9b82af} by adding {@code show-details: always} to the SHIPPED yml — the exact disclosure this
+   * row exists to catch, not an arbitrary edit — and re-running {@code ./mvnw -B -ntp clean verify}
+   * at full suite scope: 4 of 138 red, this row among them, failing with {@code Unexpected:
+   * components}. The comparator names the extra key. The relaxation therefore cost the ordering pin
+   * and nothing else.
+   *
+   * <p><strong>And a second probe shows it is {@link JsonCompareMode#STRICT} specifically that does
+   * the catching</strong> — which is the half the first probe cannot answer. Same {@code
+   * show-details: always} on the SHIPPED yml, but with this call additionally relaxed to the
+   * one-argument {@code json(String)} overload: the row goes from RED back to
+   * <strong>GREEN</strong>. So the second argument is not decoration. Delete it and this row keeps
+   * passing through exactly the disclosure above — a silent regression, green in CI, on the fleet's
+   * RS256 signer. The warning in the previous paragraph was reasoning until this differential; it
+   * is now a measurement, and that is why the mode is named explicitly instead of defaulted.
+   *
+   * <p>Under that mutation the tokenless body carries {@code database: "PostgreSQL"} and {@code
+   * validationQuery: "isValid()"} from the datasource, {@code readinessState}, and — on the wire
+   * row in {@code RealServletContainerWireIntegrationTest} — SSL chain state, disk {@code total} /
+   * {@code free} / {@code threshold} and the server's <em>absolute path on the host
+   * filesystem</em>. All of it unauthenticated, on the pod network, from the service that signs the
+   * fleet's RS256 tokens and holds the bcrypt hashes. {@code $.status} stays {@code "UP"}
+   * throughout, which is exactly why a subset assertion here would be worthless.
+   *
+   * <p>One asymmetry, so nobody later "fixes" the wrong row: under that same mutation the liveness
+   * row below stays GREEN, and that is correct rather than vacuous. Boot's auto-configured
+   * availability-probe group hardcodes {@code show-details: never}, so only the root aggregate and
+   * the explicitly-declared {@code readiness} group inherit the endpoint setting (contract §4f).
    */
   @Test
   void health_withoutToken_returns200_withExactRenderedBody() throws Exception {
