@@ -147,11 +147,30 @@ class RealServletContainerWireIntegrationTest extends AbstractIntegrationTest {
    * {@code components} inventory still reddens this row — and both values verbatim. The three
    * single-key/empty bodies below stay byte-exact, because no reordering can move them.
    *
+   * <p><strong>The no-whitespace assertion below is load-bearing, not belt-and-braces.</strong> Its
+   * MockMvc twin now compares parsed JSON ({@code content().json(...)}), which is insensitive to
+   * formatting, so that row can no longer see added indentation at all. This is the only assertion
+   * left in the suite that can see whitespace <em>in the ROOT body</em> — the readiness, liveness
+   * and info bodies still carry byte-exact assertions of their own, both here and in the MockMvc
+   * class, so the gap is specific to the one body that had to be relaxed. This line reads as
+   * redundant only against the byte-exact form both root rows used before the Boot 4.1 bump, and
+   * that form is gone.
+   *
    * <p><strong>The two-key claim is measured, not reasoned</strong> — it describes an assertion
    * this slice deliberately weakened. Probed at {@code a9b82af} by adding {@code show-details:
    * always} to the SHIPPED yml (the disclosure this row guards, not an arbitrary edit), {@code
-   * ./mvnw -B -ntp clean verify} at full suite scope: 4 of 138 red, this row among them, {@code
-   * expected: <[groups, status]> but was: <[components, groups, status]>}.
+   * ./mvnw -B -ntp clean verify} at full suite scope: 4 of 138 red, this row among them, on the
+   * key-set assertion: the actual set is {@code [components, groups, status]} against an expected
+   * set of two keys.
+   *
+   * <p><strong>Do not "correct" the printed order of the {@code expected} half of that
+   * message.</strong> It is not stable: that half is rendered from {@code Set.of("status",
+   * "groups")}, and {@code Set.of} randomises iteration order per JVM run — measured across 12
+   * invocations as 8x {@code [groups, status]} and 4x {@code [status, groups]}. Two correct runs
+   * disagree, so a reader who sees the other order has not found a drift. Only the extra {@code
+   * components} key is meaningful in that message. The {@code but was} half comes from a {@code
+   * HashSet} and IS deterministic, which is why independent runs match on it character for
+   * character.
    *
    * <p>What that mutation exposes on the wire, recorded because this row's failure message is the
    * only place in the suite it is legible: the inventory carries {@code db} ({@code database:

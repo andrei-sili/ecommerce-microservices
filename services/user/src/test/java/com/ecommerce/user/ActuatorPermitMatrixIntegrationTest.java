@@ -98,8 +98,19 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
    * a9b82af} by adding {@code show-details: always} to the SHIPPED yml — the exact disclosure this
    * row exists to catch, not an arbitrary edit — and re-running {@code ./mvnw -B -ntp clean verify}
    * at full suite scope: 4 of 138 red, this row among them, failing with {@code Unexpected:
-   * components}. The comparator names the extra key. The relaxation therefore cost the ordering pin
-   * and nothing else.
+   * components}. The comparator names the extra key.
+   *
+   * <p>What the relaxation cost, stated exactly: the ordering pin — <em>and</em> whitespace
+   * sensitivity, which it did not lose so much as hand off. {@code content().json(...)} compares
+   * parsed JSON, so unlike the byte-exact form it replaced, this row can no longer see added
+   * indentation. That property still has an owner: {@code
+   * RealServletContainerWireIntegrationTest#shippedActuatorBodies_onRealTomcat_matchTheMockMvcPins}
+   * asserts the root body contains no space and no newline, and after this change it is the only
+   * assertion in this suite that can see whitespace <em>in the ROOT body</em>. (The readiness,
+   * liveness and info bodies keep their own byte-exact assertions, here and there, so they are
+   * unaffected — the gap is specific to the one body that had to be relaxed.) Anyone tempted to
+   * drop that line as redundant should read this paragraph first: it is redundant only with a form
+   * that no longer exists.
    *
    * <p><strong>And a second probe shows it is {@link JsonCompareMode#STRICT} specifically that does
    * the catching</strong> — which is the half the first probe cannot answer. Same {@code
