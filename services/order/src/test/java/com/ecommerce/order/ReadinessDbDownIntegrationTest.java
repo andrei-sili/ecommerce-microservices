@@ -35,9 +35,9 @@ import org.testcontainers.containers.PostgreSQLContainer;
  * immediately; the K8s pod-loss failure mode is the opposite (the IP vanishes with no RST, and only
  * pgjdbc's {@code socketTimeout} bounds the read). A green here is therefore NOT evidence that
  * pod-loss detection works — that remains the job of {@code infra/scripts/podloss-readiness.sh}.
- * Recorded because {@code .claude/rules/testing.md} warns that a {@code container.stop()} probe
- * passes even without the socketTimeout fix, and a class named for readiness is exactly where
- * someone would later mistake one for the other.
+ * Recorded here, in the class itself, because a {@code stop()}-based probe passes whether or not
+ * the socketTimeout fix is in place — so reading one as evidence of the other would be a vacuous
+ * green, and a class named for readiness is exactly where someone would later make that mistake.
  *
  * <p>The class carries its own container because it stops it; the shared base's container is reused
  * by every other integration class. It sets no {@code management.*} property: B9(a) requires the
