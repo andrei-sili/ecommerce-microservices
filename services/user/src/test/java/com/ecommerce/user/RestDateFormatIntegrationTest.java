@@ -12,18 +12,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ecommerce.user.repository.OutboxEventRepository;
 import com.ecommerce.user.repository.RefreshTokenRepository;
 import com.ecommerce.user.repository.UserRepository;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins the wire FORMAT of every date this service emits over REST — {@code created_at}, {@code
@@ -179,7 +179,7 @@ class RestDateFormatIntegrationTest extends AbstractIntegrationTest {
 
   private static void assertKeys(JsonNode body, Set<String> expected) {
     Set<String> actual = new HashSet<>();
-    body.fieldNames().forEachRemaining(actual::add);
+    body.propertyNames().forEach(actual::add);
     assertEquals(expected, actual, "envelope must expose exactly the contract keys");
   }
 
