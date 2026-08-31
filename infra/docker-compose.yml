@@ -290,9 +290,18 @@ services:
     networks:
       - ecommerce-net
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # `ping` only answers for the Erlang node, NOT the `rabbit` application: a node that
+      # terminates during boot (bad definitions file, corrupt schema) keeps answering
+      # "Ping succeeded" while serving nothing, so every downstream depends_on:service_healthy
+      # passes against a dead broker. Measured, not theorised: a boot-time definitions file
+      # missing its vhost crash-looped this container, and `ping` returned success 5/5 while
+      # compose called it Healthy and started notification-service against it.
+      # `check_running` asserts the application is up, which is what the dependents actually
+      # need -- and is what the K8s readinessProbe in k8s/base/rabbitmq/ already used.
+      # The timeout goes to 10s with it: check_running does real work where ping does not.
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 10
       start_period: 30s
 
