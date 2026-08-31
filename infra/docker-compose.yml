@@ -320,16 +320,20 @@ services:
   #
   # No app service depends on this one: the spy is a test affordance and must never gate the
   # stack coming up. That leaves a window between the broker going healthy and the import
-  # landing, in which a relay could publish an event the spy has no queue for yet. Today that
-  # window is empty: the queues are durable, so it only exists on a first boot with a brand-new
-  # volume, and a brand-new volume means brand-new service databases with no outbox rows to
-  # publish.
+  # landing, in which a relay can publish an event the spy has no queue for yet.
   #
-  # That is a property of the current seeding, NOT of this design. Anything that puts outbox
-  # rows in a service database at startup -- a seed migration, a fixture loader, a restored
-  # dump -- reopens the window SILENTLY: the events simply are not copied, and no probe fails.
-  # If that ever lands, gate the publishing services on this one with
-  # `condition: service_completed_successfully` and accept the coupling.
+  # The window reopens whenever the BROKER's state is reset independently of the service
+  # databases, which is a normal operation rather than an exotic one: rabbitmq-data is one of
+  # seven independent named volumes below, a sibling of the six service DB volumes, so
+  # `docker volume rm ecommerce_rabbitmq-data` -- the ordinary reflex for a bad broker state --
+  # destroys the spy queues while leaving all six service DBs intact, outbox rows included.
+  #
+  # It is quiet rather than obvious because of an asymmetry, measured and not assumed: the
+  # SERVICE topology self-heals (clients re-declare on reconnect) and the spy does NOT, since
+  # this container has already exited and nothing re-runs a one-shot. Delete both queues,
+  # restart only the broker, and notification's queue returns by itself while spy.order-placed
+  # stays gone -- so the next probe is silently EMPTY, green because it measured nothing.
+  # Recovery: `docker compose up -d rabbitmq-spy-topology`. See infra/rabbitmq/README.md.
   rabbitmq-spy-topology:
     image: rabbitmq:3-management-alpine
     container_name: ecommerce-rabbitmq-spy-topology
@@ -344,8 +348,11 @@ services:
       - ./rabbitmq/definitions.json:/definitions.json:ro
     networks:
       - ecommerce-net
-    # $$ escapes Compose interpolation so the shell expands these at runtime: the credentials
-    # stay out of the compose file and out of `docker compose config` output.
+    # $$ escapes Compose interpolation so the shell expands these at runtime, which keeps the
+    # password out of the committed argv and out of `docker inspect .Config.Cmd` -- the rendered
+    # command stays literally "$RABBITMQ_PASSWORD". It does NOT keep it out of
+    # `docker compose config`, which prints the value anyway from the environment: block two
+    # lines above (and from four other services that take the same variable).
     entrypoint: ["sh", "-c"]
     command:
       - >
