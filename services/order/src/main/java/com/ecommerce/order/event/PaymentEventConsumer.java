@@ -3,9 +3,6 @@ package com.ecommerce.order.event;
 import com.ecommerce.order.client.ProductReservationClient;
 import com.ecommerce.order.config.RabbitMQConfig;
 import com.ecommerce.order.exception.UpstreamServiceException;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +12,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Consumes payment events from {@code order.payment-events} with manual ack. The message is acked
@@ -33,10 +33,7 @@ public class PaymentEventConsumer {
 
   // Dedicated camelCase mapper — event contract uses camelCase, REST uses snake_case.
   private static final JsonMapper EVENT_MAPPER =
-      JsonMapper.builder()
-          .addModule(new JavaTimeModule())
-          .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .build();
+      JsonMapper.builder().disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS).build();
 
   private final PaymentEventHandlerService handlerService;
   private final ProductReservationClient reservationClient;
@@ -67,6 +64,12 @@ public class PaymentEventConsumer {
       }
     } catch (PermanentConsumerFailureException e) {
       log.error("Permanent failure processing payment event, routing to DLQ: {}", e.getMessage());
+      channel.basicNack(tag, false, false);
+    } catch (JacksonException e) {
+      // Jackson 3 throws this (unchecked) where Jackson 2 threw IOException. Without this branch a
+      // malformed payload would fall to the transient handler below and be REQUEUED rather than
+      // dead-lettered -- a poison message looping instead of parking in the DLQ.
+      log.error("Failed to deserialize payment event payload: {}", e.getMessage());
       channel.basicNack(tag, false, false);
     } catch (IOException e) {
       log.error("Failed to deserialize payment event payload: {}", e.getMessage());

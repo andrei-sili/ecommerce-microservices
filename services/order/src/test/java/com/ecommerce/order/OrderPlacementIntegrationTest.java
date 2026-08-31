@@ -29,8 +29,6 @@ import com.ecommerce.order.service.OrderPersistenceService;
 import com.ecommerce.order.support.AbstractIntegrationTest;
 import com.ecommerce.order.support.ContractShape;
 import com.ecommerce.order.support.TestJwt;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
@@ -43,6 +41,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class OrderPlacementIntegrationTest extends AbstractIntegrationTest {
 
