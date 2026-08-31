@@ -184,10 +184,15 @@ class CartControllerWebTest {
   // These rows render through GlobalExceptionHandler.handleApi (ApiException), not through
   // handleExceptionInternal. The substitution probe used to attribute the validation rows below —
   // handleExceptionInternal rendering ProblemDetail.forStatus instead of the envelope — cannot
-  // reach handleApi, so it never exercised these rows. Their media type is therefore unverified in
-  // either direction: not shown guarded, not shown unguarded. Settling it needs a mutation on
-  // handleApi itself, with the same paired counterfactual (red on the mutated rendering, green on
-  // the shipped one).
+  // reach handleApi, so it never exercised these rows, and their media type was unverified in
+  // either direction: not shown guarded, not shown unguarded.
+  //
+  // Settled by mutating handleApi itself to render a ProblemDetail. With the exact media-type
+  // guards below in place every one of these rows goes red naming application/problem+json; with
+  // the guards removed the same mutation leaves them green, because a ProblemDetail still carries
+  // the machine code these rows read by jsonPath. The guard runs BEFORE the body for the same
+  // reason it does on the validation rows: every way this path drifts also destroys the body, so a
+  // leading jsonPath reports "No value at JSON path" and names the wrong cause.
 
   @Test
   void addItem_unavailableProduct_returns409() throws Exception {
@@ -200,6 +205,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":2}"))
         .andExpect(status().isConflict())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("PRODUCT_UNAVAILABLE"));
   }
 
@@ -214,6 +220,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":99,\"quantity\":1}"))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("PRODUCT_NOT_FOUND"));
   }
 
@@ -228,6 +235,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":50,\"quantity\":1}"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("MIXED_CURRENCY_CART"));
   }
 
@@ -242,6 +250,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"product_id\":42,\"quantity\":50}"))
         .andExpect(status().isUnprocessableEntity())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("QUANTITY_LIMIT_EXCEEDED"));
   }
 
@@ -256,6 +265,7 @@ class CartControllerWebTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"quantity\":3}"))
         .andExpect(status().isNotFound())
+        .andExpect(content().contentType(MediaType.APPLICATION_JSON))
         .andExpect(jsonPath("$.error").value("CART_ITEM_NOT_FOUND"));
   }
 

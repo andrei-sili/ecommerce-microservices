@@ -1,11 +1,13 @@
 package com.ecommerce.cart;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.cart.config.JwtProperties;
 import com.ecommerce.cart.support.JwtTestKeys;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -63,6 +65,31 @@ class Rs256OnlySecretAbsentValidationIntegrationTest {
   }
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private JwtProperties jwtProperties;
+
+  /**
+   * The row that makes this class's name true. Neither HTTP row below can detect a resurrected
+   * secret, and it took a deliberate look to see why: the RS256 row passes whether or not a secret
+   * is bound, and the HS256 forgery is rejected at the ALLOWLIST — before any key is looked up — so
+   * it too passes with a secret present. Both rows would stay green on the exact regression the
+   * class claims to guard, which made the claim in its title unbacked rather than merely thin.
+   *
+   * <p>Reading the bound property directly is the only assertion that fails when the binding comes
+   * back. Proven by inserting {@code security.jwt.secret} into the SHIPPED yml with the value the
+   * HS256 fixtures actually sign with — not an arbitrary string. That distinction is the whole
+   * probe: with any other value the forgery would not validate even against a broken allowlist, so
+   * the run would be green either way and would discriminate nothing. With the signing value, this
+   * row is the one that goes red while both HTTP rows stay green, which is exactly the gap being
+   * closed.
+   */
+  @Test
+  void jwtSecret_isNotBound_theShippedFailClosedPosture() {
+    assertThat(jwtProperties.secret())
+        .as(
+            "security.jwt.secret must stay ABSENT: with HS256 out of the allowlist a bound secret is"
+                + " a live rollback path that no HTTP row in this class can observe")
+        .isNull();
+  }
 
   @Test
   void rs256Token_accepted_whenSecretPropertyAbsent() throws Exception {
