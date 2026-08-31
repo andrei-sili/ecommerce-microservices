@@ -11,7 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ecommerce.cart.support.AbstractIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -22,11 +22,11 @@ import org.springframework.test.web.servlet.MvcResult;
  * behind auth. The endpoint lives off the {@code /api/v1} business-versioning namespace on purpose
  * (ClusterIP-internal, never on the Kong edge).
  *
- * <p>{@code @AutoConfigureObservability} re-enables the metrics export the Spring Boot test harness
+ * <p>{@code @AutoConfigureMetrics} re-enables the metrics export the Spring Boot test harness
  * disables by default (via {@code management.defaults.metrics.export.enabled=false}); the running
  * app has no such override, so the endpoint is exposed there without any flag.
  */
-@AutoConfigureObservability(tracing = false)
+@AutoConfigureMetrics
 class MetricsEndpointIntegrationTest extends AbstractIntegrationTest {
 
   @Autowired private MockMvc mockMvc;

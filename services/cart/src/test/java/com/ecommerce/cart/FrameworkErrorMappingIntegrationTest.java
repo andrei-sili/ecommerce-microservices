@@ -13,10 +13,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ecommerce.cart.exception.ApiException;
+import com.ecommerce.cart.exception.GlobalExceptionHandler;
 import com.ecommerce.cart.repository.CartRepository;
 import com.ecommerce.cart.support.AbstractIntegrationTest;
 import com.ecommerce.cart.support.TestJwt;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +34,11 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Full-context guard for framework/dispatcher error mapping on the Cart service: unmapped path,
@@ -47,6 +60,7 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private CartRepository cartRepository;
+  @Autowired private ObjectMapper objectMapper;
 
   private static final String USER = TestJwt.bearer(TestJwt.token("7", List.of("USER")));
 
@@ -241,6 +255,107 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
         .as(
             "envelope media type must be exactly application/json: never problem+json, never absent")
         .isEqualTo("application/json");
+  }
+
+  /**
+   * A6. The 403 envelope on the probe path the invariant actually specifies.
+   *
+   * <p>This service already had a 403 row, but on {@code /actuator/env}. That path's status is a
+   * product of endpoint EXPOSURE and security, not of security alone: {@code env} is not in {@code
+   * management.endpoints.web.exposure.include}, so a change to exposure could flip it 403 to 404
+   * and the row would report a security regression that never happened, or miss one that did.
+   * {@code /internal-denied} is decided by the chain and nothing else — the dispatcher maps no
+   * handler for it, and it matches only the terminal {@code denyAll()}. The {@code /actuator/env}
+   * row stays as a second, weaker observation of the same handler.
+   *
+   * <p>Rendered by {@code RestAccessDeniedHandler} through {@code response.getWriter()}, which
+   * bypasses the {@code @RestControllerAdvice} entirely, so nothing else in this class covers it.
+   *
+   * <p><b>The Content-Type asserted here is MockMvc's normalisation, not the production string.</b>
+   * On the wire this response carries {@code application/json;charset=ISO-8859-1}: the servlet spec
+   * has the container stamp its default charset onto a writer response, and MockMvc reports the
+   * value the framework computed before the container touched it. The wire value is measured
+   * separately, by {@code RealServletContainer401IntegrationTest}, and that row — not this one — is
+   * the evidence for what a real client reads. Written here rather than in a report so the constant
+   * below is not read as a claim about production.
+   */
+  @Test
+  void deniedPath_withValidToken_returns403_withExactForbiddenEnvelope() throws Exception {
+    MvcResult result =
+        mockMvc.perform(get("/internal-denied").header("Authorization", USER)).andReturn();
+
+    // Media type leads: every way this row drifts also destroys the body, so a body assertion
+    // placed first would report "No value at JSON path" instead of naming the cause.
+    assertEnvelopeContentType(result);
+    assertThat(result.getResponse().getStatus()).isEqualTo(403);
+
+    JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
+    assertThat(keysOf(body)).containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(body.get("error").asText()).isEqualTo("FORBIDDEN");
+    assertThat(body.get("message").asText()).isEqualTo("Insufficient permissions");
+    assertThat(body.get("path").asText()).isEqualTo("/internal-denied");
+    Instant.parse(body.get("timestamp").asText());
+  }
+
+  /**
+   * A10, the structural half. The catch-all {@code @ExceptionHandler(Exception.class)} must stay
+   * the only 500 producer, and no standalone handler may declare a type {@link
+   * ResponseEntityExceptionHandler} already maps — that is an ambiguous mapping, which fails at
+   * STARTUP rather than in a test, so it takes the whole service down instead of turning one row
+   * red.
+   *
+   * <p>The base-mapped set is read reflectively from the framework on the classpath instead of
+   * being hard-coded, so a future Spring version that ADDS a mapping colliding with ours goes red
+   * here rather than at the next deploy. Both of our specific handlers are legal today precisely
+   * because only their SUPERtypes are base-mapped: {@code MethodArgumentTypeMismatchException} sits
+   * under {@code TypeMismatchException}, which the base class maps.
+   *
+   * <p><b>The standalone set is pinned EXACTLY, not by containment.</b> A subset assertion
+   * discharges the ambiguity half but not the single-500-producer half: a brand-new handler
+   * returning 500 would satisfy {@code contains(Exception.class)} while adding exactly the second
+   * producer this row forbids. An exact set makes any new standalone handler a deliberate decision
+   * — add it here, and say which status it renders.
+   *
+   * <p>Scope, so the row is not read louder than it is. This pins WHICH types get a standalone
+   * handler; it does not execute them, so it cannot see one of the three non-catch-all handlers
+   * being changed to render 500. Those statuses are held by behavioural rows elsewhere in this
+   * class and in the cart suites. Nor does "only 500 producer" cover the base class, which maps
+   * framework types that are 5xx by definition — a missing path variable is a mapping bug — which
+   * is why {@code handleExceptionInternal} has a 5xx branch at all. The claim is about OUR
+   * standalone handlers.
+   */
+  @Test
+  void noStandaloneHandlerIsAmbiguousWithTheBaseClass_andTheCatchAllIsTheOnly500() {
+    Set<Class<?>> baseMapped = mappedTypes(ResponseEntityExceptionHandler.class);
+    Set<Class<?>> standalone = mappedTypes(GlobalExceptionHandler.class);
+
+    assertThat(baseMapped).as("reflection must actually find the base mappings").isNotEmpty();
+    assertThat(standalone).as("reflection must actually find our handlers").isNotEmpty();
+
+    assertThat(standalone)
+        .as(
+            "a standalone @ExceptionHandler declaring a type the base class already maps is an"
+                + " ambiguous mapping and fails startup, not this test")
+        .doesNotContainAnyElementsOf(baseMapped);
+
+    assertThat(standalone)
+        .as(
+            "the catch-all must remain, and remain the ONLY standalone handler beyond these — a new"
+                + " one here is a candidate second 500 producer and must be justified, not absorbed")
+        .containsExactlyInAnyOrder(
+            ApiException.class, MethodArgumentTypeMismatchException.class, Exception.class);
+  }
+
+  private static Set<Class<?>> mappedTypes(Class<?> handler) {
+    return Arrays.stream(handler.getDeclaredMethods())
+        .map(method -> method.getAnnotation(ExceptionHandler.class))
+        .filter(Objects::nonNull)
+        .flatMap(annotation -> Arrays.stream(annotation.value()))
+        .collect(Collectors.toSet());
+  }
+
+  private static Set<String> keysOf(JsonNode object) {
+    return new LinkedHashSet<>(object.propertyNames());
   }
 
   /** No error body may leak the static-resource message, a stack trace or other internals. */
