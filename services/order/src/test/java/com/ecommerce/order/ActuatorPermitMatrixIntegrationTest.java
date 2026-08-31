@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -59,7 +60,10 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
         .andExpect(
-            content().json("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}", true));
+            content()
+                .json(
+                    "{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}",
+                    JsonCompareMode.STRICT));
   }
 
   @Test
@@ -68,7 +72,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/actuator/health/readiness"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().json("{\"status\":\"UP\"}", true));
+        .andExpect(content().json("{\"status\":\"UP\"}", JsonCompareMode.STRICT));
   }
 
   @Test
@@ -77,7 +81,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/actuator/health/liveness"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().json("{\"status\":\"UP\"}", true));
+        .andExpect(content().json("{\"status\":\"UP\"}", JsonCompareMode.STRICT));
   }
 
   @Test
@@ -86,6 +90,6 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/actuator/info"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().json("{}", true));
+        .andExpect(content().json("{}", JsonCompareMode.STRICT));
   }
 }
