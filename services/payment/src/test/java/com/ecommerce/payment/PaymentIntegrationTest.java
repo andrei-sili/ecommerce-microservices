@@ -2,6 +2,8 @@ package com.ecommerce.payment;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -23,6 +25,7 @@ import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
+import com.ecommerce.payment.service.PaymentPersistenceService;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.ecommerce.payment.support.JsonShape;
 import com.ecommerce.payment.support.TestJwt;
@@ -33,6 +36,7 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import org.apache.commons.codec.binary.Hex;
@@ -40,10 +44,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class PaymentIntegrationTest extends AbstractIntegrationTest {
 
@@ -68,6 +76,21 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
 
   // Real by default (writes outbox rows); stubbed to throw only in the atomicity test.
   @MockitoSpyBean private OutboxService outboxService;
+
+  // Real by default; stubbed only in the replay-race ownership test, where the point is to
+  // reproduce an interleaving that cannot be produced deterministically from the outside.
+  @MockitoSpyBean private PaymentPersistenceService persistence;
+
+  @Autowired private PlatformTransactionManager transactionManager;
+
+  /** Commits the racing request's row independently of the transaction it is racing against. */
+  private TransactionTemplate requiresNewTransaction;
+
+  @BeforeEach
+  void prepareIndependentTransaction() {
+    requiresNewTransaction = new TransactionTemplate(transactionManager);
+    requiresNewTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+  }
 
   @BeforeEach
   void cleanDb() {
@@ -405,6 +428,120 @@ class PaymentIntegrationTest extends AbstractIntegrationTest {
                         .formatted(UUID.randomUUID())))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error").value("VALIDATION_ERROR"));
+  }
+
+  /**
+   * The ownership guard on the SECOND replay branch — the one reached only when {@code
+   * reservePending} loses a race on the idempotency key ({@code PaymentService.java:143-145}).
+   *
+   * <p><b>Why this needs its own test rather than being covered by the fast-path row.</b> There are
+   * two replay branches and they are reached by different paths. The fast path at {@code :94-99}
+   * fires when the key is ALREADY committed at lookup time, and it is covered. This one fires only
+   * when the row appears BETWEEN our fast-path lookup and our insert — a genuine interleaving,
+   * which is exactly why it had no test: from outside the service it cannot be produced on demand.
+   * Replacing this branch's condition with {@code false} left the whole suite green at 129/0.
+   *
+   * <p><b>What it protects.</b> With the guard gone the service returns 200 with the WINNER's
+   * {@code PaymentResponse} — another user's payment id, user id, amount, currency and gateway — to
+   * whoever guessed or reused their idempotency key. It is the replay-path IDOR that {@code
+   * testing.md} names in as many words: "alt user schimbă id/key → 403/404, niciodată datele
+   * altuia, inclusiv pe replay".
+   *
+   * <p><b>The spy is reproducing an interleaving, not stubbing the thing under test.</b> The
+   * ownership check, the repository lookup, the exception mapping and the rendered envelope are all
+   * real; only the timing of the competing INSERT is forced. Stubbing {@code reservePending} to
+   * commit the winner's row and then throw the same {@code DataIntegrityViolationException} the
+   * unique index raises is the faithful shape — the alternative, two real concurrent requests, is a
+   * flaky test of the database rather than a test of this branch.
+   */
+  @Test
+  void replayLosingTheIdempotencyRace_toAnotherUsersKey_returns404_andLeaksNothing()
+      throws Exception {
+    // Captured from the row the stub commits. The id is assigned by Hibernate on persist and is
+    // deliberately NOT forced: an entity handed a pre-set id is DETACHED, so save() issues a merge
+    // (an UPDATE against a row that does not exist yet) and the request dies on an optimistic-lock
+    // failure — a 500 that looks like a broken guard but is entirely the test's doing.
+    AtomicReference<UUID> victimPaymentId = new AtomicReference<>();
+    String sharedKey = "key-replay-race";
+
+    // The attacker's own order, so the ownership check at step (2a) passes and execution actually
+    // reaches the reservation. Without this the request would 404 earlier, for the wrong reason.
+    UUID attackerOrderId = UUID.randomUUID();
+    when(orderClient.getOrder(any(), any()))
+        .thenReturn(new OrderView(attackerOrderId, 99L, "PENDING", new BigDecimal("39.98"), "EUR"));
+
+    doAnswer(
+            invocation -> {
+              // The competing request committed between our lookup and our insert.
+              Payment winner =
+                  new Payment(
+                      UUID.randomUUID(),
+                      USER_ID,
+                      new BigDecimal("39.98"),
+                      "EUR",
+                      PaymentStatus.SUCCEEDED,
+                      "sandbox",
+                      "pm_valid_token",
+                      sharedKey);
+              winner.setGatewayPaymentId("gw_victim_row");
+              // REQUIRES_NEW, and it is load-bearing rather than defensive. The spy sits INSIDE
+              // reservePending's @Transactional proxy, so throwing below rolls that transaction
+              // back — and a plain save() here would go with it, leaving the lookup in the catch
+              // block empty and the request answering 409 ORDER_PAYMENT_IN_PROGRESS instead of
+              // reaching the branch under test. It is also the faithful shape: the request that
+              // won the race really did commit in its own transaction.
+              victimPaymentId.set(
+                  requiresNewTransaction.execute(
+                      status -> paymentRepository.saveAndFlush(winner).getId()));
+              throw new DataIntegrityViolationException(
+                  "duplicate key value violates unique constraint"
+                      + " \"uix_payments_idempotency_key\"");
+            })
+        .when(persistence)
+        .reservePending(any(), any(), any(), any(), any(), eq(sharedKey));
+
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/payments")
+                    .header("Authorization", OTHER_USER)
+                    .header("Idempotency-Key", sharedKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        """
+                        {"order_id":"%s","payment_method_token":"pm_valid_token"}
+                        """
+                            .formatted(attackerOrderId)))
+            .andExpect(status().isNotFound())
+            .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(JsonShape.keysOf(body))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(body, "$.error")).isEqualTo("PAYMENT_NOT_FOUND");
+    assertThat(JsonPath.<String>read(body, "$.message")).isEqualTo("Payment not found");
+
+    // The leak this exists to stop, asserted on the raw text: none of the winner's resource
+    // identity may appear. A broken guard renders the full PaymentResponse here.
+    assertThat(victimPaymentId.get())
+        .as("the stub must actually have committed the winner's row, or nothing was guarded")
+        .isNotNull();
+    assertThat(body)
+        .as("another user's payment must never be rendered through the replay race path")
+        .doesNotContain(victimPaymentId.get().toString())
+        .doesNotContain("gw_victim_row")
+        .doesNotContain("user_id")
+        .doesNotContain("order_id");
+
+    // And the winner's row is untouched: the attacker neither read it nor rebound it.
+    Payment untouched = paymentRepository.findById(victimPaymentId.get()).orElseThrow();
+    assertThat(untouched.getUserId()).isEqualTo(USER_ID);
+    assertThat(untouched.getIdempotencyKey()).isEqualTo(sharedKey);
+    assertThat(paymentRepository.count())
+        .as("the losing request must not leave a second row behind")
+        .isEqualTo(1);
   }
 
   // ---- Webhook: missing signature → 401 ----
