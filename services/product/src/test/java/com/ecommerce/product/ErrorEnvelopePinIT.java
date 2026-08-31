@@ -15,8 +15,6 @@ import com.ecommerce.product.repository.ProductRepository;
 import com.ecommerce.product.repository.StockReservationRepository;
 import com.ecommerce.product.support.AbstractIntegrationTest;
 import com.ecommerce.product.support.TestJwt;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +28,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Pins the EXACT key set of both error envelopes product emits: the 4-key auth/plain envelope and

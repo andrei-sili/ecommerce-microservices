@@ -2,6 +2,10 @@ spring:
   application:
     name: product-service
   jackson:
+    # FREEZE (commit 1 of this migration only): keeps Jackson 2's defaults under Jackson 3 so the
+    # parent bump cannot change a single serialized byte. Removed in the ABSORB commit, which is
+    # what lets any body diff be bisected to the defaults rather than to the version bump.
+    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
   datasource:
