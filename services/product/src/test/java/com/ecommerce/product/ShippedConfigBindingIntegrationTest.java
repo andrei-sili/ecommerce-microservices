@@ -9,14 +9,14 @@ import com.ecommerce.product.security.RestAccessDeniedHandler;
 import com.ecommerce.product.security.RestAuthenticationEntryPoint;
 import com.ecommerce.product.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
 
 /**
  * Binds, at the bean level, the two serialization invariants that a green HTTP suite can only prove
@@ -128,11 +128,11 @@ class ShippedConfigBindingIntegrationTest extends AbstractIntegrationTest {
   void bootMapper_bindsSnakeCaseAndNonNullInclusion_fromTheShippedYml() {
     assertEquals(
         PropertyNamingStrategies.SNAKE_CASE,
-        objectMapper.getSerializationConfig().getPropertyNamingStrategy(),
+        objectMapper.serializationConfig().getPropertyNamingStrategy(),
         "spring.jackson.property-naming-strategy did not bind onto the Boot mapper");
     assertEquals(
         JsonInclude.Include.NON_NULL,
-        objectMapper.getSerializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
+        objectMapper.serializationConfig().getDefaultPropertyInclusion().getValueInclusion(),
         "spring.jackson.default-property-inclusion did not bind onto the Boot mapper");
   }
 }

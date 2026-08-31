@@ -1,7 +1,6 @@
 package com.ecommerce.product.security;
 
 import com.ecommerce.product.exception.ErrorResponse;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -11,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Gate for the internal reservation endpoints ({@code /api/v1/inventory/reservations**}). Requires

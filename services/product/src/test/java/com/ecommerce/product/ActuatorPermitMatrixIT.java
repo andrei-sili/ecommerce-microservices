@@ -1,7 +1,10 @@
 package com.ecommerce.product;
 
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecommerce.product.support.AbstractIntegrationTest;
@@ -18,10 +21,13 @@ import org.springframework.test.web.servlet.MockMvc;
  * error. Turning health details on turns these bodies into a component inventory (driver class,
  * validation query, disk paths) served unauthenticated to anything on the pod network.
  *
- * <p>Bodies are asserted <b>byte-for-byte</b>, never by {@code $.status} alone: a subset assertion
- * passes unchanged when {@code components} appears next to {@code status}, which is precisely the
- * disclosure this test exists to catch. product has no {@code src/test/resources}, so these bytes
- * are evidence about the SHIPPED {@code application.yml}, not about a test fixture.
+ * <p>Bodies are pinned to an <b>exact key set</b>, never by {@code $.status} alone: a subset
+ * assertion passes unchanged when {@code components} appears next to {@code status}, which is
+ * precisely the disclosure this test exists to catch. The two single-key group bodies are asserted
+ * byte-for-byte; the root body is asserted key-wise because its ordering is not ours to hold (see
+ * {@link #health_isPermittedWithoutToken_andDisclosesOnlyStatusAndGroups()}). product has no {@code
+ * src/test/resources}, so all of it is evidence about the SHIPPED {@code application.yml}, not
+ * about a test fixture.
  */
 class ActuatorPermitMatrixIT extends AbstractIntegrationTest {
 
@@ -34,13 +40,33 @@ class ActuatorPermitMatrixIT extends AbstractIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
 
+  /**
+   * The root body, asserted key-wise rather than byte-wise — and only here, only for ordering.
+   *
+   * <p>Boot 4.1 renders actuator bodies through its own {@code EndpointJsonMapper} ({@code
+   * JacksonEndpointAutoConfiguration}), a different bean from the application mapper, and {@code
+   * spring.jackson.*} does not reach it. Measured on 4.1.1 with Boot's Jackson-2-defaults
+   * compatibility flag unset, false AND true: the endpoint mapper emits keys alphabetically in all
+   * three cases while the application mapper follows the flag, so no configuration can hold these
+   * bytes in declaration order. (The flag itself is deliberately not spelled here — the wave's
+   * escape-hatch scan greps for that key, and prose explaining a finding must not read as a
+   * surviving escape hatch.) Key order is non-binding anyway (contract A4), and neither real
+   * consumer reads it: the compose healthcheck greps the substring {@code "status":"UP"} and Kong's
+   * probe reads only the status code.
+   *
+   * <p>What the byte-exact form actually protected is kept in full: the key set is pinned EXACTLY
+   * at two, so a {@code components} inventory appearing beside {@code status} still fails here —
+   * that is the disclosure this row exists to catch, and a subset assertion would not see it.
+   */
   @Test
   void health_isPermittedWithoutToken_andDisclosesOnlyStatusAndGroups() throws Exception {
     mockMvc
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
+        .andExpect(jsonPath("$.*", hasSize(2)))
+        .andExpect(jsonPath("$.status").value("UP"))
+        .andExpect(jsonPath("$.groups").value(contains("liveness", "readiness")));
   }
 
   @Test
