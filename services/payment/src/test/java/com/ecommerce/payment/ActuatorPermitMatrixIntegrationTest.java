@@ -10,6 +10,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 
 /**
@@ -49,6 +50,22 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest 
    * {@code always} produces, and it discloses DB hostnames and connection state to anything on the
    * pod network (F4). {@code groups} is present here because probes are enabled in production, so
    * it is part of the pin, not noise.
+   *
+   * <p><b>Key ORDER is deliberately not asserted; the key SET and the values are.</b> This row was
+   * a byte-exact {@code content().string(...)} until the Boot 4 bump, where it was the module's
+   * only failure: same keys, same values, reordered to {@code {"groups":…,"status":"UP"}} because
+   * Jackson 3 sorts alphabetically. The FREEZE flag {@code spring.jackson.use-jackson2-defaults}
+   * cannot hold this body — actuator serializes through {@code EndpointJsonMapper}, a separate bean
+   * built by {@code JacksonEndpointAutoConfiguration} that no {@code management.*} property
+   * governs. Contract A4 declares key order non-binding, so the new byte string is deliberately NOT
+   * re-pinned: that would re-break on the next Boot patch for no contractual reason. Adding
+   * production config to force an ordering is worse still — it would freeze the bytes by a
+   * mechanism that does not ship.
+   *
+   * <p>{@code JsonCompareMode.STRICT} is named explicitly. The one-argument {@code json(String)}
+   * overload is LENIENT, so dropping the second argument while "tidying" would leave this row green
+   * through exactly the disclosure regression it exists to catch. The sibling rows below stay
+   * byte-exact: a one-key or empty body has no order to lose, so nothing forces them to relax.
    */
   @Test
   void health_tokenless_returns200_exactBody() throws Exception {
@@ -56,7 +73,11 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractBrokerIntegrationTest 
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
+        .andExpect(
+            content()
+                .json(
+                    "{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}",
+                    JsonCompareMode.STRICT));
   }
 
   @Test

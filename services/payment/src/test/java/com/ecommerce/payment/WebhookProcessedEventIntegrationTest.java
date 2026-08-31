@@ -26,7 +26,6 @@ import com.ecommerce.payment.service.PaymentService;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.ecommerce.payment.support.TestJwt;
 import com.ecommerce.payment.support.WebhookSignature;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -40,6 +39,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The webhook pinned by its EFFECT rather than its status code, and the replay pinned so that

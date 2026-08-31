@@ -3,8 +3,8 @@ package com.ecommerce.payment.config;
 import java.time.Duration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
-import org.springframework.boot.http.client.ClientHttpRequestFactorySettings;
-import org.springframework.boot.web.client.RestClientCustomizer;
+import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.boot.restclient.RestClientCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -27,8 +27,8 @@ public class ClientsConfig {
   @Bean
   @Order(Ordered.HIGHEST_PRECEDENCE)
   public RestClientCustomizer timeoutRestClientCustomizer(ClientsProperties properties) {
-    ClientHttpRequestFactorySettings settings =
-        ClientHttpRequestFactorySettings.defaults()
+    HttpClientSettings settings =
+        HttpClientSettings.defaults()
             .withConnectTimeout(Duration.ofMillis(properties.getConnectTimeoutMs()))
             .withReadTimeout(Duration.ofMillis(properties.getReadTimeoutMs()));
     ClientHttpRequestFactory requestFactory =

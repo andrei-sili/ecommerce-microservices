@@ -17,8 +17,6 @@ import com.ecommerce.payment.model.PaymentStatus;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.support.JwtTestKeys;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashSet;
@@ -28,8 +26,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -37,6 +35,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.PostgreSQLContainer;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Phase-3 production shape: {@code accepted-algs} rides the SHIPPED yaml default (RS256) and the
@@ -145,8 +145,7 @@ class Rs256OnlyNoSecretValidationIntegrationTest {
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
-    Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    Set<String> keys = new HashSet<>(body.propertyNames());
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,

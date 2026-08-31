@@ -13,6 +13,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -106,6 +107,60 @@ class ContentTypeWireIntegrationTest extends AbstractIntegrationTest {
         .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
     assertThat(JsonPath.<String>read(response.body(), "$.error"))
         .isEqualTo("INVALID_WEBHOOK_SIGNATURE");
+  }
+
+  /**
+   * A8's other path-A renderer. {@code RestAccessDeniedHandler} writes through {@code
+   * response.getWriter()} exactly as the entry point does, so it must carry the same
+   * container-appended charset — but "identical code shape" is an argument, not a measurement, and
+   * A8 is a row about measured container strings. So the 403 is measured on the wire rather than
+   * inferred from the 401 above.
+   *
+   * <p>403 is reachable here because {@code SecurityConfig} terminates in {@code
+   * .anyRequest().denyAll()}: any authenticated request to a path outside {@code /api/v1/**} and
+   * the actuator permits lands on the access-denied handler. {@code /internal-denied} is never
+   * dispatcher-mapped, so its status comes from the security chain rather than from a controller —
+   * which is what makes this a test of the chain and not of a route.
+   */
+  @Test
+  void pathA_accessDenied403_carriesTheSameContainerAppendedCharset() throws Exception {
+    HttpResponse<String> response = get("/internal-denied", USER);
+
+    assertThat(response.statusCode()).isEqualTo(403);
+    assertThat(contentType(response))
+        .as("the access-denied handler is the other getWriter() path, so it renders like path A")
+        .isEqualTo(PATH_A_CONTENT_TYPE);
+    assertThat(JsonShape.keysOf(response.body()))
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path");
+    assertThat(JsonPath.<String>read(response.body(), "$.error")).isEqualTo("FORBIDDEN");
+    assertThat(JsonPath.<String>read(response.body(), "$.message"))
+        .isEqualTo("Insufficient permissions");
+    assertThat(JsonPath.<String>read(response.body(), "$.path")).isEqualTo("/internal-denied");
+  }
+
+  /**
+   * A8's second clause: the {@code Content-Type} strings differ per path, but the KEY SET does not.
+   * Both halves matter and they pull in opposite directions — asserting the types identical was the
+   * false claim this class was built to retire, while letting the shapes diverge would mean a
+   * client has to know which internal renderer produced an error before it can parse it.
+   *
+   * <p>Asserted as a set comparison across all three paths in one place rather than three separate
+   * four-key assertions, because what is being pinned is the EQUALITY of the shapes, not each shape
+   * on its own — those are already pinned in the rows above.
+   */
+  @Test
+  void allThreeRenderingPaths_emitTheSameFourKeySet_despiteDifferentContentTypes()
+      throws Exception {
+    Set<String> entryPoint401 =
+        JsonShape.keysOf(get("/api/v1/payments/" + UUID.randomUUID(), null).body());
+    Set<String> accessDenied403 = JsonShape.keysOf(get("/internal-denied", USER).body());
+    Set<String> converterStack404 = JsonShape.keysOf(get("/api/v1/payments-typo", USER).body());
+
+    assertThat(entryPoint401)
+        .as("the contract envelope is the same four keys whichever renderer produced it")
+        .containsExactlyInAnyOrder("error", "message", "timestamp", "path")
+        .isEqualTo(accessDenied403)
+        .isEqualTo(converterStack404);
   }
 
   private static String contentType(HttpResponse<String> response) {

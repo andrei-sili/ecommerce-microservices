@@ -17,6 +17,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ecommerce.payment.client.OrderClient;
 import com.ecommerce.payment.client.OrderView;
+import com.ecommerce.payment.exception.ApiException;
+import com.ecommerce.payment.exception.GlobalExceptionHandler;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.repository.OutboxEventRepository;
 import com.ecommerce.payment.repository.PaymentRepository;
@@ -25,8 +27,13 @@ import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.ecommerce.payment.support.TestJwt;
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +42,10 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /**
  * Full-context guard for framework/dispatcher error mapping in the (money-sensitive) Payment
@@ -231,6 +242,70 @@ class FrameworkErrorMappingIntegrationTest extends AbstractIntegrationTest {
     actions
         .andExpect(jsonPath("$.id", is(paymentId)))
         .andExpect(jsonPath("$.status", is("SUCCEEDED")));
+  }
+
+  /**
+   * A10, structural half. The catch-all {@code @ExceptionHandler(Exception.class)} must stay the
+   * only 500 producer, and no standalone handler may declare a type the {@link
+   * ResponseEntityExceptionHandler} base class already maps — that is an ambiguous mapping and a
+   * STARTUP crash, not a test failure, so it would take the whole service down rather than redden a
+   * row.
+   *
+   * <p>The base-mapped set is read reflectively from the framework on the classpath rather than
+   * hard-coded, so this goes red if a future Spring version ADDS a mapping that collides with one
+   * of ours. Both of payment's non-catch-all framework handlers are legal today for exactly that
+   * reason and no other: {@code MissingRequestHeaderException} sits under {@code
+   * ServletRequestBindingException} and {@code MethodArgumentTypeMismatchException} under {@code
+   * TypeMismatchException}, and only the SUPERtypes are base-mapped.
+   *
+   * <p><b>The standalone set is pinned EXACTLY, not by {@code contains}.</b> A subset assertion
+   * discharges the "no ambiguity" half but not the "single 500 producer" half: a brand-new
+   * {@code @ExceptionHandler} returning 500 satisfies {@code contains(Exception.class)} while
+   * adding the second producer the row forbids. An exact set turns any new standalone handler into
+   * a deliberate decision — add it here, and say which status it renders.
+   *
+   * <p><b>"Only 500" is narrower than "only 5xx".</b> {@code handleApi} renders {@code
+   * ex.getStatus()}, so the standalone {@code ApiException} handler already emits 401, 402, 404,
+   * 409 and 422 across this service. That is correct per api-design.md and leaves the row's letter
+   * intact: the catch-all stays the only producer of 500.
+   *
+   * <p>Scope, so this is not read louder than it is. It pins WHICH types get a standalone handler;
+   * it does not execute them, so it cannot see one of the three non-catch-all handlers being
+   * changed to return 500. Those statuses are held by the behavioural rows in this class and in
+   * {@link PaymentIntegrationTest}.
+   */
+  @Test
+  void noStandaloneHandlerIsAmbiguousWithTheBaseClass_andTheCatchAllIsTheOnly500() {
+    Set<Class<?>> baseMapped = mappedTypes(ResponseEntityExceptionHandler.class);
+    Set<Class<?>> standalone = mappedTypes(GlobalExceptionHandler.class);
+
+    assertFalse(baseMapped.isEmpty(), "reflection must actually find the base mappings");
+    assertFalse(standalone.isEmpty(), "reflection must actually find our handlers");
+
+    assertTrue(
+        Collections.disjoint(standalone, baseMapped),
+        () ->
+            "a standalone @ExceptionHandler declaring a type the base class already maps is an"
+                + " ambiguous mapping and fails startup; overlap: "
+                + standalone.stream().filter(baseMapped::contains).toList());
+
+    assertEquals(
+        Set.of(
+            ApiException.class,
+            MissingRequestHeaderException.class,
+            MethodArgumentTypeMismatchException.class,
+            Exception.class),
+        standalone,
+        "the catch-all must remain, and remain the ONLY standalone handler that can render 500 — a"
+            + " new one here is a candidate second 500 producer and must be justified, not absorbed");
+  }
+
+  private static Set<Class<?>> mappedTypes(Class<?> handler) {
+    return Arrays.stream(handler.getDeclaredMethods())
+        .map(m -> m.getAnnotation(ExceptionHandler.class))
+        .filter(Objects::nonNull)
+        .flatMap(a -> Arrays.stream(a.value()))
+        .collect(Collectors.toSet());
   }
 
   /** Creates a SUCCEEDED payment owned by USER and returns its id. */
