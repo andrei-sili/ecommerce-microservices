@@ -21,8 +21,6 @@ import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.repository.PaymentTransactionRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.math.BigDecimal;
@@ -39,6 +37,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Shared scaffolding for the Slice 5e dual-accept validation suites on the money-moving Payment
@@ -154,8 +154,7 @@ abstract class AbstractDualAcceptTest extends AbstractIntegrationTest {
 
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
-    Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    Set<String> keys = new HashSet<>(body.propertyNames());
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,

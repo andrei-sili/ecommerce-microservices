@@ -1,7 +1,6 @@
 package com.ecommerce.payment.security;
 
 import com.ecommerce.payment.exception.ErrorResponse;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -9,6 +8,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 /** Emits the standard error body with 401 when authentication is missing or invalid. */
 @Component

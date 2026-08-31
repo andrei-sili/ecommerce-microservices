@@ -121,13 +121,13 @@ public class OutboxRelay {
       CorrelationData.Confirm confirm =
           p.correlation().getFuture().get(remainingMs, TimeUnit.MILLISECONDS);
       boolean returned = p.correlation().getReturned() != null;
-      if (confirm.isAck() && !returned) {
+      if (confirm.ack() && !returned) {
         return true;
       }
       log.warn(
           "Outbox event id={} not routable/confirmed (ack={}, returned={}); will retry next run",
           p.event().getId(),
-          confirm.isAck(),
+          confirm.ack(),
           returned);
       return false;
     } catch (InterruptedException e) {

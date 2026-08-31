@@ -6,12 +6,12 @@ import com.ecommerce.payment.client.OrderClient;
 import com.ecommerce.payment.relay.OutboxRelay;
 import com.ecommerce.payment.support.AbstractIntegrationTest;
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import java.net.URL;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
 
 /**
  * Contract B9, bean level: the autowired Boot {@link ObjectMapper} must carry {@code SNAKE_CASE}
@@ -42,7 +42,7 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
 
   @Test
   void bootMapper_serializesWithSnakeCaseNaming() {
-    assertThat(objectMapper.getSerializationConfig().getPropertyNamingStrategy())
+    assertThat(objectMapper.serializationConfig().getPropertyNamingStrategy())
         .as("spring.jackson.property-naming-strategy, bound from the SHIPPED application.yml")
         .isSameAs(PropertyNamingStrategies.SNAKE_CASE);
   }
@@ -54,7 +54,7 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
    */
   @Test
   void bootMapper_deserializesWithSnakeCaseNaming() {
-    assertThat(objectMapper.getDeserializationConfig().getPropertyNamingStrategy())
+    assertThat(objectMapper.deserializationConfig().getPropertyNamingStrategy())
         .as("spring.jackson.property-naming-strategy on the inbound side")
         .isSameAs(PropertyNamingStrategies.SNAKE_CASE);
   }
@@ -65,8 +65,7 @@ class JacksonBindingIntegrationTest extends AbstractIntegrationTest {
    */
   @Test
   void bootMapper_defaultPropertyInclusionIsNonNull() {
-    assertThat(
-            objectMapper.getSerializationConfig().getDefaultPropertyInclusion().getValueInclusion())
+    assertThat(objectMapper.serializationConfig().getDefaultPropertyInclusion().getValueInclusion())
         .as("spring.jackson.default-property-inclusion, bound from the SHIPPED application.yml")
         .isEqualTo(JsonInclude.Include.NON_NULL);
   }

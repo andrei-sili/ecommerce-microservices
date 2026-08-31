@@ -2,6 +2,12 @@ spring:
   application:
     name: payment-service
   jackson:
+    # FREEZE (commit 1 of the Boot 4 migration only). Holds Jackson 2's defaults so this commit
+    # carries the version bump and the import moves with serialized output unchanged. Removed in
+    # the ABSORB commit, which is what lets any body diff be bisected to the defaults rather than
+    # to the bump. It does NOT reach the actuator: that serializes through EndpointJsonMapper,
+    # a separate bean no management.* property governs.
+    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
   datasource:

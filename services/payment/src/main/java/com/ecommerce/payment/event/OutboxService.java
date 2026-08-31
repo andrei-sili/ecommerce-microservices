@@ -3,11 +3,10 @@ package com.ecommerce.payment.event;
 import com.ecommerce.payment.model.OutboxEvent;
 import com.ecommerce.payment.model.Payment;
 import com.ecommerce.payment.repository.OutboxEventRepository;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Instant;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Records payment domain events in the transactional outbox. The payload uses camelCase (event
@@ -23,10 +22,7 @@ public class OutboxService {
 
   // Dedicated mapper: event payloads are camelCase (api_contracts.md catalog).
   private final JsonMapper mapper =
-      JsonMapper.builder()
-          .addModule(new JavaTimeModule())
-          .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .build();
+      JsonMapper.builder().disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS).build();
 
   public OutboxService(OutboxEventRepository repository) {
     this.repository = repository;

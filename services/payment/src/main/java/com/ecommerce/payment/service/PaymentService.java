@@ -14,7 +14,6 @@ import com.ecommerce.payment.model.PaymentStatus;
 import com.ecommerce.payment.repository.PaymentRepository;
 import com.ecommerce.payment.repository.ProcessedWebhookEventRepository;
 import com.ecommerce.payment.security.CurrentUser;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +32,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Orchestrates the payment flow. It owns no DB transaction: every persistence step is delegated to
