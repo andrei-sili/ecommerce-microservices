@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
@@ -61,6 +62,13 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
    * every consumer reads these bodies by key — so asserting it here was pinning a property the
    * contract says must not be pinned. Strict JSON comparison keeps everything this row exists for
    * and drops only the ordering claim.
+   *
+   * <p><b>{@link JsonCompareMode#STRICT} is load-bearing and must not be dropped.</b> The one-arg
+   * {@code json(String)} overload compares LENIENTLY, which tolerates keys the response GAINED —
+   * and a gained key is the disclosure regression this row exists to catch. Proven, not assumed:
+   * flipping the shipped {@code show-details} to {@code always} fails this row with {@code
+   * Unexpected: components}. So "simplifying" the call by deleting the second argument would leave
+   * the row green through exactly the change it guards against.
    */
   @Test
   void health_tokenless_returns200_withTheExactShippedBody() throws Exception {
@@ -69,7 +77,10 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
         .andExpect(
-            content().json("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}", true));
+            content()
+                .json(
+                    "{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}",
+                    JsonCompareMode.STRICT));
   }
 
   /** Byte-equal {@code {"status":"UP"}} — no {@code components}, no {@code details} (F4). */
