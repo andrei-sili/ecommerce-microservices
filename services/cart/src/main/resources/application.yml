@@ -2,6 +2,10 @@ spring:
   application:
     name: cart-service
   jackson:
+    # FREEZE half of the two-commit migration: keeps Jackson 2's defaults while the version and the
+    # import moves land, so serialized output stays byte-identical and any body diff found later in
+    # the fleet bisects to the absorbed defaults rather than to the bump. Removed in the next commit.
+    use-jackson2-defaults: true
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
   datasource:

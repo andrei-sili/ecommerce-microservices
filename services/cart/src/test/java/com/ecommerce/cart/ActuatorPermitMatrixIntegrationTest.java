@@ -9,8 +9,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ecommerce.cart.support.AbstractIntegrationTest;
 import com.ecommerce.cart.support.JwtTestKeys;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.Set;
@@ -18,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The PERMIT side of the security chain, which no test covered before: probes and info must answer
@@ -37,16 +37,30 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
   private static final String ENVELOPE_JSON = "application/json";
 
   /**
-   * The SHIPPED body, byte-for-byte. {@code management.endpoint.health.show-details} is set nowhere
-   * in this repo, so production runs the default {@code never}; cart has no {@code
-   * src/test/resources}, so this row reads the real {@code application.yml} and is evidence about
-   * production, not about a test fixture. A {@code $.status} subset assertion cannot see a flipped
-   * default, which would disclose the DB product and version to any unauthenticated caller on
-   * {@code ecommerce-net} or in namespace {@code ecommerce} (F4).
+   * The SHIPPED body: exact key SET and exact values, strict so a GAINED key still fails. {@code
+   * management.endpoint.health.show-details} is set nowhere in this repo, so production runs the
+   * default {@code never}; cart has no {@code src/test/resources}, so this row reads the real
+   * {@code application.yml} and is evidence about production, not about a test fixture. A {@code
+   * $.status} subset assertion cannot see a flipped default, which would disclose the DB product
+   * and version to any unauthenticated caller on the cluster network (F4) — strict mode can,
+   * because an added {@code components} key fails it.
    *
    * <p>The {@code groups} array is part of the shipped disclosure — {@code
    * management.endpoint.health.probes.enabled: true} registers the liveness/readiness groups and
    * the aggregate endpoint lists them even at {@code show-details: never}.
+   *
+   * <p><b>Why this is a strict JSON comparison and not a byte-string one.</b> It used to assert the
+   * raw string. At Spring Boot 4.1.1 the actuator emits the same keys and values in alphabetical
+   * order — {@code {"groups":[...],"status":"UP"}} — and the migration's serialization-freeze flag
+   * cannot hold it, because the actuator serializes through its own mapper (the endpoint mapper
+   * shipped in the actuator module) rather than through the application mapper that {@code
+   * spring.jackson.*} configures. Measured rather than assumed: the endpoint emits the reordered
+   * body identically with the freeze flag set to true and to false, while in the same run the 401
+   * envelope written through the application mapper keeps its declaration order. Key order is
+   * deliberately not part of this service's wire contract — JSON object members are unordered, and
+   * every consumer reads these bodies by key — so asserting it here was pinning a property the
+   * contract says must not be pinned. Strict JSON comparison keeps everything this row exists for
+   * and drops only the ordering claim.
    */
   @Test
   void health_tokenless_returns200_withTheExactShippedBody() throws Exception {
@@ -54,7 +68,8 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
         .perform(get("/actuator/health"))
         .andExpect(status().isOk())
         .andExpect(content().contentType(ACTUATOR_JSON))
-        .andExpect(content().string("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}"));
+        .andExpect(
+            content().json("{\"status\":\"UP\",\"groups\":[\"liveness\",\"readiness\"]}", true));
   }
 
   /** Byte-equal {@code {"status":"UP"}} — no {@code components}, no {@code details} (F4). */
@@ -129,7 +144,7 @@ class ActuatorPermitMatrixIntegrationTest extends AbstractIntegrationTest {
     JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
     Instant.parse(body.get("timestamp").asText());
     Set<String> keys = new HashSet<>();
-    body.fieldNames().forEachRemaining(keys::add);
+    body.propertyNames().forEach(keys::add);
     assertEquals(
         Set.of("error", "message", "timestamp", "path"),
         keys,
