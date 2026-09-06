@@ -28,6 +28,12 @@
          owned by the fleet-verification slice — the override is identical in all five poms, so one
          service removing it alone would split the fleet on a shared transitive pin. -->
     <postgresql.version>42.7.12</postgresql.version>
+    <!-- The Boot 4.1.1 BOM manages tomcat 11.0.24: CVE-2026-65182, CVE-2026-65905 and
+         CVE-2026-68525 are all CRITICAL and all carry a fix, so none is waivable under the gate
+         policy. Pinned at 11.0.25 on 2026-09-06.
+         Removal condition: delete this override once the parent BOM manages >= 11.0.25 (the first
+         Boot 4.1.x/4.2.x that does), and re-scan to prove it. -->
+    <tomcat.version>11.0.25</tomcat.version>
     <jjwt.version>0.12.6</jjwt.version>
     <testcontainers.version>2.0.5</testcontainers.version>
     <spotless.version>2.43.0</spotless.version>
